@@ -1,0 +1,4 @@
+# a phase needing this many arguments wants a struct
+too-many-arguments-threshold = 6
+# routing gets knotty on its own; flag it before it gets worse
+cognitive-complexity-threshold = 20
