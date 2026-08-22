@@ -4,6 +4,10 @@
 //! width, with an explicit objective for what a good drawing looks like.
 //!
 //! See `docs/design.md` for what this is meant to be and `docs/plan.md` for the
-//! order it is being built in. Nothing is public yet.
+//! order it is being built in. Only the model exists so far.
 
 #![warn(missing_docs)]
+
+pub mod graph;
+
+pub use graph::{Edge, EdgeId, Graph, Node, NodeId};
