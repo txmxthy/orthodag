@@ -6,6 +6,7 @@
 //! before it; nothing is shared through a context object.
 
 mod acyclic;
+mod rank;
 
 use crate::graph::{EdgeId, Graph, NodeId};
 
