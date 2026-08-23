@@ -7,6 +7,7 @@
 
 mod acyclic;
 mod layer;
+mod order;
 mod rank;
 
 use crate::graph::{EdgeId, Graph, NodeId};
