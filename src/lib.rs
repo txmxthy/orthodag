@@ -8,6 +8,9 @@
 //! far; nothing draws.
 
 #![warn(missing_docs)]
+// The no-unwrap rule is about the library, not its tests: a test that cannot
+// reach its own precondition should stop there and say so.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 pub mod graph;
 
