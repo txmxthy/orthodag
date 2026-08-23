@@ -39,3 +39,87 @@ impl Adjacency {
         self.out.get(node.index()).map_or(&[], Vec::as_slice)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Adjacency;
+    use super::{acyclic::back_edges, layer::layer, order, rank::rank};
+    use crate::graph::{Graph, Node};
+
+    /// A pseudo-random graph that is the same graph every time.
+    ///
+    /// Nothing in the library is random, so a generator is only here to reach
+    /// shapes nobody would write by hand — several columns, fan-out, skips and
+    /// a few cycles at once.
+    fn seeded(seed: u64, nodes: usize, edges: usize) -> Graph {
+        let mut state = seed | 1;
+        let mut next = move || {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (state >> 33) as usize
+        };
+
+        let mut g = Graph::new();
+        let ids: Vec<_> = (0..nodes)
+            .map(|i| g.add_node(Node::new(format!("n{i}"))))
+            .collect();
+        for _ in 0..edges {
+            let (a, b) = (next() % nodes, next() % nodes);
+            if a == b {
+                continue;
+            }
+            // A tenth of the edges point backwards, so cycles are in the mix.
+            let (from, to) = if next() % 10 == 0 {
+                (b, a)
+            } else {
+                (a.min(b), a.max(b))
+            };
+            g.add_tagged_edge(ids[from], ids[to], [format!("t{}", next() % 4)]);
+        }
+        g
+    }
+
+    /// Everything there is so far: acyclic, ranked, layered, ordered.
+    fn pipeline(g: &Graph) -> Vec<order::Columns> {
+        let adj = Adjacency::of(g);
+        let acyclic = back_edges(g, &adj);
+        let ranked = rank(g, &adj, &acyclic);
+        order::orderings(&layer(g, &adj, &acyclic, &ranked))
+    }
+
+    #[test]
+    fn the_same_graph_orders_the_same_way_every_run() {
+        let g = seeded(0x5EED, 60, 140);
+        let once = pipeline(&g);
+        assert!(once.len() > 1, "the graph is too tame to be worth checking");
+        for run in 0..16 {
+            assert_eq!(pipeline(&g), once, "run {run} differed");
+        }
+    }
+
+    #[test]
+    fn different_graphs_are_not_accidentally_the_same() {
+        assert_ne!(pipeline(&seeded(1, 40, 90)), pipeline(&seeded(2, 40, 90)));
+    }
+
+    #[test]
+    fn the_candidate_count_stays_inside_its_budget() {
+        // Nine: the initial order, plus at most one per sweep.
+        for seed in 1..24u64 {
+            assert!(
+                pipeline(&seeded(seed, 120, 300)).len() <= 9,
+                "seed {seed} ran long"
+            );
+        }
+    }
+
+    #[test]
+    fn a_graph_with_no_edges_still_pipelines() {
+        let mut g = Graph::new();
+        for i in 0..5 {
+            g.add_node(Node::new(format!("n{i}")));
+        }
+        assert_eq!(pipeline(&g).len(), 1);
+    }
+}
