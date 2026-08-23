@@ -146,6 +146,39 @@ fn apply(columns: &mut Columns, column: usize, mut keys: Vec<(Slot, Bary)>) {
     }
 }
 
+/// How many sweeps to run before giving up on finding anything new.
+///
+/// The sweeps either settle or cycle, and both happen quickly. This is the
+/// budget on a stage that scales with the graph, and it is small because the
+/// expensive half of ordering is not here — it is drawing each candidate.
+const MAX_SWEEPS: usize = 8;
+
+/// Every distinct column order the sweeps propose, the initial one first.
+///
+/// A sweep is a **proposal, not a decision**. Barycenter is a heuristic reading
+/// the layered graph, and the layered graph is not what a reader sees: it cannot
+/// tell that a box hides a crossing, or that two runs merge into one apparent
+/// line. So every distinct order it passes through is kept, and the choice
+/// between them is made later, by drawing them and scoring the drawings.
+///
+/// Sweeping stops as soon as it repeats itself, which is what settling looks
+/// like from here.
+pub(crate) fn orderings(l: &Layered) -> Vec<Columns> {
+    let hops = Hops::of(l);
+    let mut current = l.all().to_vec();
+    let mut candidates = vec![current.clone()];
+
+    for _ in 0..MAX_SWEEPS {
+        sweep(&mut current, &hops);
+        if candidates.contains(&current) {
+            break;
+        }
+        candidates.push(current.clone());
+    }
+
+    candidates
+}
+
 /// One pass over every column, left to right then right to left.
 pub(crate) fn sweep(columns: &mut Columns, hops: &Hops) {
     for column in 1..columns.len() {
@@ -235,6 +268,52 @@ mod tests {
             swept(&l)[1],
             [Slot::Node(ids[1]), Slot::Node(ids[2]), Slot::Node(ids[3])]
         );
+    }
+
+    #[test]
+    fn the_initial_order_is_always_one_of_the_candidates() {
+        let (_, l) = build(4, &[(0, 3), (1, 2)]);
+        assert_eq!(orderings(&l).first(), Some(&l.all().to_vec()));
+    }
+
+    #[test]
+    fn a_settled_graph_proposes_nothing_further() {
+        // A chain is already in the only order it has.
+        let (_, l) = build(3, &[(0, 1), (1, 2)]);
+        assert_eq!(orderings(&l).len(), 1);
+    }
+
+    #[test]
+    fn a_crossing_produces_a_second_candidate() {
+        let (ids, l) = build(4, &[(0, 3), (1, 2)]);
+        let candidates = orderings(&l);
+        assert!(candidates.len() > 1, "the sweep found nothing to propose");
+        let last = candidates.last().expect("candidates are never empty");
+        assert_eq!(last[1], [Slot::Node(ids[3]), Slot::Node(ids[2])]);
+    }
+
+    #[test]
+    fn no_candidate_is_offered_twice() {
+        let (_, l) = build(7, &[(0, 3), (1, 4), (2, 3), (0, 5), (3, 6), (4, 6), (5, 6)]);
+        let candidates = orderings(&l);
+        for (at, candidate) in candidates.iter().enumerate() {
+            assert!(
+                !candidates[..at].contains(candidate),
+                "candidate {at} repeats an earlier one"
+            );
+        }
+    }
+
+    #[test]
+    fn a_candidate_never_gains_or_loses_a_slot() {
+        let (_, l) = build(6, &[(0, 1), (0, 5), (1, 2), (2, 3), (3, 5), (0, 4), (4, 5)]);
+        let mut want: Vec<_> = l.all().iter().flatten().copied().collect();
+        want.sort_unstable();
+        for candidate in orderings(&l) {
+            let mut got: Vec<_> = candidate.iter().flatten().copied().collect();
+            got.sort_unstable();
+            assert_eq!(got, want);
+        }
     }
 
     #[test]
