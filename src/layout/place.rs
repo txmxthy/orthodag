@@ -89,6 +89,7 @@ pub(crate) fn place(g: &Graph, columns: &Columns, hops: &Hops) -> Placed {
         .iter()
         .map(|c| c.iter().map(|s| node_height(g, *s)).collect())
         .collect();
+    let height = heights.iter().map(|c| natural(c)).max().unwrap_or(0);
     let mut placed = Placed {
         tops: stacked(&heights),
         heights,
@@ -106,10 +107,44 @@ pub(crate) fn place(g: &Graph, columns: &Columns, hops: &Hops) -> Placed {
             let wanted = desired(columns, hops, &placed, column, pass % 2 == 0);
             settle(&mut placed, column, &wanted);
         }
+        normalise(&mut placed);
+        press(&mut placed, height);
     }
 
     normalise(&mut placed);
     placed
+}
+
+/// How tall a column is with its slots packed as tightly as the gap allows.
+fn natural(heights: &[i32]) -> i32 {
+    let stacked: i32 = heights.iter().sum();
+    stacked + GAP * i32::try_from(heights.len().saturating_sub(1)).unwrap_or(0)
+}
+
+/// Pulls a column back inside `height`, moving each slot as little as it can.
+///
+/// A sweep only ever pushes slots down — a slot that cannot have the row it
+/// wants takes the next one free below — so a column drifts taller than it needs
+/// to be. Pressing walks it from the bottom up and moves a slot only when it
+/// does not fit, which is the smallest correction that makes the column fit.
+fn press(placed: &mut Placed, height: i32) {
+    for column in 0..placed.tops.len() {
+        let Some(heights) = placed.heights.get(column) else {
+            continue;
+        };
+        let mut ceiling = height;
+        let mut tops = placed.tops.get(column).cloned().unwrap_or_default();
+        for at in (0..tops.len()).rev() {
+            let (Some(top), Some(h)) = (tops.get_mut(at), heights.get(at)) else {
+                continue;
+            };
+            *top = (*top).min(ceiling - h);
+            ceiling = *top - GAP;
+        }
+        if let Some(slot) = placed.tops.get_mut(column) {
+            *slot = tops;
+        }
+    }
 }
 
 /// Every column stacked from the top, which is where a sweep starts from.
@@ -365,6 +400,35 @@ mod tests {
             }
         }
         assert!(c.placed.height() > 0);
+    }
+
+    #[test]
+    fn no_column_is_taller_than_the_tallest_needs_to_be() {
+        // Five in one column against one in the next: the tall column sets the
+        // height and nothing else may exceed it.
+        let c = case(
+            &["a", "v", "w", "x", "y", "z", "end"],
+            &[(0, 1), (0, 2), (0, 3), (0, 4), (0, 5), (1, 6), (5, 6)],
+        );
+        let height = c.placed.height();
+        for (column, slots) in c.columns.iter().enumerate() {
+            for at in 0..slots.len() {
+                assert!(
+                    c.placed.top(column, at) >= 0 && c.placed.bottom(column, at) <= height,
+                    "column {column} slot {at} falls outside 0..{height}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_drawing_is_no_taller_than_its_fullest_column() {
+        let c = case(
+            &["a", "w", "x", "y", "z"],
+            &[(0, 1), (0, 2), (0, 3), (0, 4)],
+        );
+        // Four boxes of three rows with a blank row between them.
+        assert_eq!(c.placed.height(), 4 * 3 + 3);
     }
 
     #[test]
