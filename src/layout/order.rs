@@ -77,7 +77,7 @@ impl<'a> Hops<'a> {
         Self { per_gap }
     }
 
-    fn gap(&self, index: usize) -> &[&'a Segment] {
+    pub(crate) fn gap(&self, index: usize) -> &[&'a Segment] {
         self.per_gap.get(index).map_or(&[], Vec::as_slice)
     }
 }
