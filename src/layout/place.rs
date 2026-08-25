@@ -12,7 +12,7 @@
 
 use super::layer::Slot;
 use super::order::{Columns, Hops};
-use crate::graph::Graph;
+use crate::graph::{EdgeId, Graph};
 
 /// Blank rows between two stacked slots.
 const GAP: i32 = 1;
@@ -112,7 +112,109 @@ pub(crate) fn place(g: &Graph, columns: &Columns, hops: &Hops) -> Placed {
     }
 
     normalise(&mut placed);
+    straighten(columns, &mut placed);
+    normalise(&mut placed);
     placed
+}
+
+/// Puts every placeholder of one edge on one row, so a long edge cannot bend.
+///
+/// The literature gets straight chains of placeholders by aligning them
+/// afterwards, which is a heuristic and can fail. Here the chain has one row for
+/// every column it passes, chosen once, so straightness is not something the
+/// layout achieves — it is something it cannot avoid.
+///
+/// The price is that a placeholder has no row of its own to be moved to, which
+/// rules out layering an alignment pass on top later. That is the trade, and it
+/// is worth it: a long edge that kinks in the middle of a drawing reads as two
+/// edges.
+///
+/// Rows are handed out longest chain first, because a chain crossing six
+/// columns has the least freedom and should not be left with what is left.
+fn straighten(columns: &Columns, placed: &mut Placed) {
+    let mut chains = chains(columns);
+    chains.sort_by_key(|(edge, cells)| (std::cmp::Reverse(cells.len()), *edge));
+
+    // One row of slack per chain is enough for every chain to find a row of its
+    // own even if the boxes leave none.
+    let rows = placed.height() + i32::try_from(chains.len()).unwrap_or(0) + 1;
+    let mut taken = occupied(columns, placed, rows);
+
+    for (_, cells) in chains {
+        let mut wanted: Vec<i32> = cells.iter().map(|(c, at)| placed.middle(*c, *at)).collect();
+        let Some(target) = median(&mut wanted) else {
+            continue;
+        };
+        let row = free_row(&taken, &cells, target, rows);
+        for (column, at) in cells {
+            if let Some(top) = placed.tops.get_mut(column).and_then(|c| c.get_mut(at)) {
+                *top = row;
+            }
+            if let Some(cell) = taken.get_mut(column).and_then(|c| c.get_mut(index(row))) {
+                *cell = true;
+            }
+        }
+    }
+}
+
+/// The placeholders of each long edge, by column and position.
+fn chains(columns: &Columns) -> Vec<(EdgeId, Vec<(usize, usize)>)> {
+    let mut chains: Vec<(EdgeId, Vec<(usize, usize)>)> = Vec::new();
+    for (column, slots) in columns.iter().enumerate() {
+        for (at, slot) in slots.iter().enumerate() {
+            let Slot::Pass(edge) = slot else { continue };
+            match chains.iter_mut().find(|(id, _)| id == edge) {
+                Some((_, cells)) => cells.push((column, at)),
+                None => chains.push((*edge, vec![(column, at)])),
+            }
+        }
+    }
+    chains
+}
+
+/// Which rows of each column a box already sits on.
+fn occupied(columns: &Columns, placed: &Placed, rows: i32) -> Vec<Vec<bool>> {
+    let mut taken = vec![vec![false; index(rows)]; columns.len()];
+    for (column, slots) in columns.iter().enumerate() {
+        for (at, slot) in slots.iter().enumerate() {
+            if !matches!(slot, Slot::Node(_)) {
+                continue;
+            }
+            for row in placed.top(column, at)..placed.bottom(column, at) {
+                if let Some(cell) = taken.get_mut(column).and_then(|c| c.get_mut(index(row))) {
+                    *cell = true;
+                }
+            }
+        }
+    }
+    taken
+}
+
+/// The row nearest `target` that is free in every column the chain passes.
+fn free_row(taken: &[Vec<bool>], cells: &[(usize, usize)], target: i32, rows: i32) -> i32 {
+    let clear = |row: i32| {
+        row >= 0
+            && row < rows
+            && cells.iter().all(|(column, _)| {
+                taken.get(*column).and_then(|c| c.get(index(row))) != Some(&true)
+            })
+    };
+    if clear(target) {
+        return target;
+    }
+    for step in 1..=rows {
+        for row in [target - step, target + step] {
+            if clear(row) {
+                return row;
+            }
+        }
+    }
+    target
+}
+
+/// A row as an index, with anything above the drawing folded onto its top.
+fn index(row: i32) -> usize {
+    usize::try_from(row.max(0)).unwrap_or(0)
 }
 
 /// How tall a column is with its slots packed as tightly as the gap allows.
@@ -446,6 +548,80 @@ mod tests {
 
         assert_eq!(placed.height_of(0, 0), 3);
         assert_eq!(placed.height_of(1, 0), 5);
+    }
+
+    #[test]
+    fn a_long_edge_runs_on_one_row_the_whole_way() {
+        // 0 -> 1 -> 2 -> 3 with 0 -> 3 passing two columns.
+        let c = case(&["a", "b", "c", "d"], &[(0, 1), (1, 2), (2, 3), (0, 3)]);
+        let long = c.g.edge_ids().last().unwrap();
+
+        let rows: Vec<i32> = c
+            .columns
+            .iter()
+            .enumerate()
+            .flat_map(|(column, slots)| {
+                slots.iter().enumerate().filter_map(move |(at, slot)| {
+                    (*slot == Slot::Pass(long)).then_some((column, at))
+                })
+            })
+            .map(|(column, at)| c.placed.middle(column, at))
+            .collect();
+
+        assert_eq!(rows.len(), 2, "the long edge should pass two columns");
+        assert!(
+            rows.windows(2).all(|w| w[0] == w[1]),
+            "the chain bends: {rows:?}"
+        );
+    }
+
+    #[test]
+    fn a_long_edge_never_runs_through_a_box() {
+        let c = case(
+            &["a", "b", "c", "d", "e"],
+            &[(0, 1), (1, 2), (2, 3), (3, 4), (0, 4), (0, 3)],
+        );
+        for (column, slots) in c.columns.iter().enumerate() {
+            let boxes: Vec<(i32, i32)> = slots
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| matches!(s, Slot::Node(_)))
+                .map(|(at, _)| (c.placed.top(column, at), c.placed.bottom(column, at)))
+                .collect();
+            for (at, slot) in slots.iter().enumerate() {
+                if !matches!(slot, Slot::Pass(_)) {
+                    continue;
+                }
+                let row = c.placed.middle(column, at);
+                assert!(
+                    boxes
+                        .iter()
+                        .all(|(top, bottom)| row < *top || row >= *bottom),
+                    "column {column}: a pass row {row} lands inside a box"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn two_long_edges_across_the_same_columns_take_different_rows() {
+        let c = case(
+            &["a", "b", "c", "d", "e"],
+            &[(0, 1), (1, 2), (2, 3), (0, 3), (0, 4), (4, 3)],
+        );
+        let mut seen: Vec<(usize, i32)> = Vec::new();
+        for (column, slots) in c.columns.iter().enumerate() {
+            for (at, slot) in slots.iter().enumerate() {
+                if matches!(slot, Slot::Pass(_)) {
+                    let row = c.placed.middle(column, at);
+                    assert!(
+                        !seen.contains(&(column, row)),
+                        "two passes share {column}:{row}"
+                    );
+                    seen.push((column, row));
+                }
+            }
+        }
     }
 
     #[test]
