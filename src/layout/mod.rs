@@ -42,11 +42,30 @@ impl Adjacency {
     }
 }
 
+/// Everything, in order: acyclic, ranked, layered, ordered, placed, routed.
+///
+/// The ordering phase proposes several candidates and this takes the first.
+/// Choosing between them means drawing each one and scoring the drawing, and
+/// there is nothing to draw with yet.
+pub(crate) fn build(g: &Graph) -> route::Layout {
+    let adj = Adjacency::of(g);
+    let acyclic = acyclic::back_edges(g, &adj);
+    let ranked = rank::rank(g, &adj, &acyclic);
+    let layered = layer::layer(g, &adj, &acyclic, &ranked);
+    let hops = order::Hops::of(&layered);
+    let columns = order::orderings(&layered)
+        .into_iter()
+        .next()
+        .unwrap_or_default();
+    let placed = place::place(g, &columns, &hops);
+    route::route(g, &acyclic, &columns, &placed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::Adjacency;
-    use super::{acyclic::back_edges, layer::layer, order, rank::rank};
-    use crate::graph::{Graph, Node};
+    use super::{acyclic::back_edges, build, layer::layer, order, rank::rank};
+    use crate::graph::{Edge, Graph, Node};
 
     /// A pseudo-random graph that is the same graph every time.
     ///
@@ -113,6 +132,105 @@ mod tests {
                 pipeline(&seeded(seed, 120, 300)).len() <= 9,
                 "seed {seed} ran long"
             );
+        }
+    }
+
+    #[test]
+    fn a_route_starts_and_ends_on_its_boxes() {
+        for seed in 1..12u64 {
+            let g = seeded(seed, 24, 50);
+            let adj = Adjacency::of(&g);
+            let acyclic = back_edges(&g, &adj);
+            let drawing = build(&g);
+
+            for route in &drawing.routes {
+                let edge = g.edge(route.edge).expect("a route names a real edge");
+                let source = drawing.boxed(edge.from()).expect("the source is drawn");
+                let target = drawing.boxed(edge.to()).expect("the target is drawn");
+                let (first, last) = (
+                    *route.points.first().expect("a route has points"),
+                    *route.points.last().expect("a route has points"),
+                );
+
+                assert_eq!(first, (source.x + source.w, source.y + (source.h - 1) / 2));
+                assert_eq!(last, (target.x - 1, target.y + (target.h - 1) / 2));
+            }
+
+            let routed: Vec<_> = drawing.routes.iter().map(|r| r.edge).collect();
+            let forward: Vec<_> = g.edge_ids().filter(|e| !acyclic.is_back(*e)).collect();
+            assert_eq!(
+                routed, forward,
+                "seed {seed}: one route per forward edge, and no more"
+            );
+        }
+    }
+
+    #[test]
+    fn a_route_turns_only_at_right_angles() {
+        for seed in 1..12u64 {
+            for route in build(&seeded(seed, 24, 50)).routes {
+                for pair in route.points.windows(2) {
+                    let [a, b] = pair else { continue };
+                    assert!(
+                        a.0 == b.0 || a.1 == b.1,
+                        "seed {seed}: {a:?}..{b:?} is diagonal"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn an_edge_between_neighbours_bends_twice_at_most() {
+        for seed in 1..12u64 {
+            let g = seeded(seed, 24, 50);
+            let adj = Adjacency::of(&g);
+            let acyclic = back_edges(&g, &adj);
+            let ranked = rank(&g, &adj, &acyclic);
+
+            for route in build(&g).routes {
+                let Some(edge) = g.edge(route.edge) else {
+                    continue;
+                };
+                let span = ranked
+                    .rank(edge.to())
+                    .saturating_sub(ranked.rank(edge.from()));
+                let allowed = if span <= 1 { 2 } else { 4 };
+                assert!(
+                    route.bends() <= allowed,
+                    "seed {seed}: a span of {span} bent {} times",
+                    route.bends()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_back_edge_is_not_routed_left_to_right() {
+        let mut g = Graph::new();
+        let ids: Vec<_> = (0..3)
+            .map(|i| g.add_node(Node::new(format!("n{i}"))))
+            .collect();
+        for &(a, b) in &[(0, 1), (1, 2), (2, 1)] {
+            g.add_edge(ids[a], ids[b]);
+        }
+        let drawing = build(&g);
+        assert_eq!(drawing.routes.len(), 2);
+        assert!(drawing.routes.iter().all(|r| {
+            g.edge(r.edge).map(Edge::to) != Some(ids[1])
+                || g.edge(r.edge).map(Edge::from) != Some(ids[2])
+        }));
+    }
+
+    #[test]
+    fn the_drawing_is_the_same_every_run() {
+        let g = seeded(0xD12E, 40, 90);
+        let once = build(&g);
+        for _ in 0..8 {
+            let again = build(&g);
+            assert_eq!(again.boxes, once.boxes);
+            assert_eq!(again.routes, once.routes);
+            assert_eq!((again.width, again.height), (once.width, once.height));
         }
     }
 
