@@ -10,7 +10,7 @@ mod layer;
 mod order;
 mod place;
 mod rank;
-mod route;
+pub(crate) mod route;
 
 use crate::graph::{EdgeId, Graph, NodeId};
 

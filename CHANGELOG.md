@@ -19,5 +19,6 @@ nothing is released yet.
   middle.
 - Orthogonal routes: straight, an L, or a Z between neighbours; four bends at
   most across a skip.
-
-Nothing draws yet.
+- The painter: four direction bits per cell, one glyph per combination, boxes
+  and labels laid over the lines.
+- `draw(&Graph) -> String`, the first thing here that produces output.

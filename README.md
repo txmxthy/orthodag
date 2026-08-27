@@ -4,10 +4,17 @@ orthodag renders a directed graph as Unicode box-drawing text. Vertices
 become boxes, and edges become orthogonal lines that fit a target width
 against an explicit objective for what a good drawing looks like.
 
-> **Status: early.** Nothing draws yet, but the model exists, and a graph
-> can already be put into columns. [docs/design.md](docs/design.md) sets
-> out what it is meant to be, and [docs/plan.md](docs/plan.md) sets out the
+> **Status: early.** It draws, though not yet well: there is no scorer, no
+> track packing and no colour, so a fan crosses its own trunk and a long
+> edge can land on another line. [docs/design.md](docs/design.md) sets out
+> what it is meant to be, and [docs/plan.md](docs/plan.md) sets out the
 > order it gets built in.
+
+```
+┌────┐     ┌─────┐     ┌─────┐
+│ in │────▶│ cat │────▶│ out │
+└────┘     └─────┘     └─────┘
+```
 
 ## The model
 
@@ -23,6 +30,19 @@ let odd = g.add_node(Node::new("odd"));
 
 g.add_tagged_edge(source, even, ["even"]);
 g.add_tagged_edge(source, odd, ["odd"]);
+
+print!("{}", orthodag::draw(&g));
+```
+
+```
+               ┌──────────────┐
+            ┌─▶│ even         │
+┌────────┐  │  │ 2 partitions │
+│ source │──┤  └──────────────┘
+└────────┘  │
+            │  ┌──────────────┐
+            └─▶│ odd          │
+               └──────────────┘
 ```
 
 A vertex carries a headline and any number of further lines drawn under it.
@@ -38,10 +58,16 @@ colour a flow keeps across the drawing.
 | cycle removal | done — back edges keep their original direction and are routed separately |
 | layer assignment | done — longest path, one column past the latest predecessor |
 | ordering, coordinates, routing | next |
-| the painter, the scorer | not started |
+| the painter | done — direction bits, one glyph per combination |
+| tracks, ports, colour | next |
+| the scorer and the quality gate | not started |
 
-Nothing above is public except the model: the phases stay internal until
-there is a `layout()` to call them from.
+`draw` is the only entry point so far, and it returns a `String`. The
+design calls for layout, drawing and scoring as three separate calls, so a
+caller can colour one edge or ask what a drawing is worth, though none of
+that exists yet.
+
+Run `cargo run --example draw` to see the drawings above and a couple more.
 
 ## Building
 

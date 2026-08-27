@@ -1,0 +1,8 @@
+---
+source: tests/golden.rs
+expression: "orthodag::draw(&g)"
+---
+┌──────────┐
+│ alone    │
+│ no edges │
+└──────────┘

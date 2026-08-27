@@ -1,0 +1,7 @@
+---
+source: tests/golden.rs
+expression: "orthodag::draw(&g)"
+---
+┌────┐     ┌──────┐     ┌───────┐
+│ in │────▶│ work │────▶│ retry │
+└────┘     └──────┘     └───────┘
