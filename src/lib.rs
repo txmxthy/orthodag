@@ -18,5 +18,7 @@ pub mod graph;
 // off with the function that ties them together.
 #[allow(dead_code)]
 mod layout;
+#[allow(dead_code)]
+mod paint;
 
 pub use graph::{Edge, EdgeId, Graph, Node, NodeId};
