@@ -19,6 +19,8 @@ pub mod graph;
 mod layout;
 #[allow(dead_code)]
 mod paint;
+#[allow(dead_code)]
+mod score;
 
 pub use graph::{Edge, EdgeId, Graph, Node, NodeId};
 

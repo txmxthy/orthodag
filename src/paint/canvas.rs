@@ -37,18 +37,7 @@ impl Canvas {
     /// Order does not matter, here or between calls: runs accumulate bits and
     /// the character is decided at the end, from the bits alone.
     pub(crate) fn path(&mut self, points: &[(i32, i32)]) {
-        for pair in points.windows(2) {
-            let [(x0, y0), (x1, y1)] = *pair else {
-                continue;
-            };
-            if y0 == y1 {
-                self.grid.hline(y0, x0, x1);
-            } else if x0 == x1 {
-                self.grid.vline(x0, y0, y1);
-            }
-            // A diagonal is not in the vocabulary. Dropping it leaves a visible
-            // hole, which is what a bug in routing should look like.
-        }
+        self.grid.path(points);
     }
 
     /// Marks where an edge arrives.

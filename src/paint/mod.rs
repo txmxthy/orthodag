@@ -5,7 +5,7 @@
 
 mod canvas;
 mod glyph;
-mod grid;
+pub(crate) mod grid;
 
 pub(crate) use canvas::Canvas;
 

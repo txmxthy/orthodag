@@ -18,6 +18,42 @@ pub(crate) const U: u8 = 4;
 /// A line leaves this cell downward.
 pub(crate) const D: u8 = 8;
 
+/// Walks an orthogonal polyline, handing each cell the bits it gains.
+///
+/// The one place that decides what a run puts where. The painter and the scorer
+/// both go through it, so a drawing and the numbers about that drawing can never
+/// disagree about which cells a line touches — which they would, eventually, if
+/// each walked the points itself.
+///
+/// A segment that is neither horizontal nor vertical is skipped: a diagonal is
+/// not in the vocabulary, and neither layer should invent one.
+pub(crate) fn walk(points: &[(i32, i32)], mut cell: impl FnMut(i32, i32, u8)) {
+    for pair in points.windows(2) {
+        let [(x0, y0), (x1, y1)] = *pair else {
+            continue;
+        };
+        if y0 == y1 {
+            let (lo, hi) = (x0.min(x1), x0.max(x1));
+            for x in lo..=hi {
+                cell(
+                    x,
+                    y0,
+                    if x < hi { R } else { 0 } | if x > lo { L } else { 0 },
+                );
+            }
+        } else if x0 == x1 {
+            let (lo, hi) = (y0.min(y1), y0.max(y1));
+            for y in lo..=hi {
+                cell(
+                    x0,
+                    y,
+                    if y < hi { D } else { 0 } | if y > lo { U } else { 0 },
+                );
+            }
+        }
+    }
+}
+
 /// A rectangle of direction bits.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Grid {
@@ -90,6 +126,15 @@ impl Grid {
             if y > lo {
                 self.add(x, y, U);
             }
+        }
+    }
+
+    /// Paints a whole polyline.
+    pub(crate) fn path(&mut self, points: &[(i32, i32)]) {
+        let mut gained = Vec::new();
+        walk(points, |x, y, bits| gained.push((x, y, bits)));
+        for (x, y, bits) in gained {
+            self.add(x, y, bits);
         }
     }
 }
@@ -166,6 +211,24 @@ mod tests {
         assert_eq!(grid.bits(0, 1), L | R);
         assert_eq!(grid.bits(2, 1), L | R);
         assert_eq!(grid.bits(0, 0), 0);
+    }
+
+    #[test]
+    fn a_walk_and_a_run_agree_on_every_cell() {
+        let points = [(1, 1), (6, 1), (6, 5), (2, 5)];
+        let (mut walked, mut drawn) = (Grid::new(9, 9), Grid::new(9, 9));
+        walk(&points, |x, y, bits| walked.add(x, y, bits));
+        drawn.hline(1, 1, 6);
+        drawn.vline(6, 1, 5);
+        drawn.hline(5, 6, 2);
+        assert_eq!(walked, drawn);
+    }
+
+    #[test]
+    fn a_walk_skips_a_diagonal() {
+        let mut touched = 0;
+        walk(&[(0, 0), (4, 4)], |_, _, _| touched += 1);
+        assert_eq!(touched, 0);
     }
 
     #[test]
