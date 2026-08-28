@@ -32,6 +32,8 @@ const MIN_WIDTH: i32 = PADDING + 1;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) struct Boxed {
     pub(crate) node: NodeId,
+    /// Which column it is in, which is how far an edge into it has come.
+    pub(crate) column: usize,
     pub(crate) x: i32,
     pub(crate) y: i32,
     pub(crate) w: i32,
@@ -185,6 +187,7 @@ fn boxes(columns: &Columns, placed: &Placed, widths: &[i32], lefts: &[i32]) -> V
             let Slot::Node(node) = slot else { continue };
             boxes.push(Boxed {
                 node: *node,
+                column,
                 x: lefts.get(column).copied().unwrap_or(0),
                 y: placed.top(column, at),
                 w: widths.get(column).copied().unwrap_or(MIN_WIDTH),

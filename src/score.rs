@@ -9,9 +9,9 @@
 //! a crossing; two runs that merge into one apparent line are one line. Neither
 //! fact is visible in the layered graph, and both are visible here.
 
-use crate::graph::EdgeId;
-use crate::layout::route::Layout;
-use crate::paint::grid::walk;
+use crate::graph::{EdgeId, Graph};
+use crate::layout::route::{Layout, Route};
+use crate::paint::grid::{D, L, R, U, walk};
 
 /// What one edge left in one cell.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -97,12 +97,187 @@ impl Raster {
     }
 }
 
+/// What one edge cost, counted on the drawn cells.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct EdgeScore {
+    pub(crate) edge: EdgeId,
+    /// How many columns it crosses. One is a neighbour.
+    pub(crate) span: usize,
+    /// Right angles it turns through.
+    pub(crate) bends: usize,
+    /// The most it is allowed, given its span.
+    pub(crate) allowed: usize,
+    /// Distinct runs it shares with edges out of the same box.
+    pub(crate) forks: usize,
+    /// Distinct runs it shares with edges into the same box.
+    pub(crate) joins: usize,
+    /// Cells where it passes another edge at a right angle.
+    pub(crate) crossings: usize,
+    /// Cells it shares with an unrelated edge in any other way.
+    pub(crate) overlaps: usize,
+    /// Vertical cells travelled beyond the rows it actually had to cover.
+    pub(crate) detour: i32,
+    /// Bends beyond the fewest it could have had.
+    pub(crate) jogs: usize,
+}
+
+/// How two edges came to share a cell.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Shared {
+    /// One straight through sideways, the other straight through downward.
+    Crossing,
+    /// They leave the same box.
+    Fork,
+    /// They arrive at the same box.
+    Join,
+    /// Anything else, which draws two edges as one line and lies to the reader.
+    Overlap,
+}
+
+/// Scores every route of a drawing on its own.
+pub(crate) fn per_edge(g: &Graph, layout: &Layout, raster: &Raster) -> Vec<EdgeScore> {
+    let mut scores: Vec<EdgeScore> = layout
+        .routes
+        .iter()
+        .map(|route| {
+            let (span, allowed) = budget(g, layout, route.edge);
+            EdgeScore {
+                edge: route.edge,
+                span,
+                bends: route.bends(),
+                allowed,
+                jogs: route.bends().saturating_sub(fewest(route)),
+                detour: detour(route),
+                // Filled in below, from the cells the routes actually share.
+                forks: 0,
+                joins: 0,
+                crossings: 0,
+                overlaps: 0,
+            }
+        })
+        .collect();
+
+    let mut forks: Vec<Vec<(i32, i32)>> = vec![Vec::new(); scores.len()];
+    let mut joins: Vec<Vec<(i32, i32)>> = vec![Vec::new(); scores.len()];
+
+    for (x, y, ink) in raster.drawn() {
+        for (at, one) in ink.iter().enumerate() {
+            for other in &ink[at + 1..] {
+                let how = shared(g, *one, *other);
+                for held in [one.edge, other.edge] {
+                    let Some(index) = scores.iter().position(|s| s.edge == held) else {
+                        continue;
+                    };
+                    match how {
+                        Shared::Crossing => scores[index].crossings += 1,
+                        Shared::Overlap => scores[index].overlaps += 1,
+                        Shared::Fork => forks[index].push((x, y)),
+                        Shared::Join => joins[index].push((x, y)),
+                    }
+                }
+            }
+        }
+    }
+
+    for (at, score) in scores.iter_mut().enumerate() {
+        score.forks = runs(&forks[at]);
+        score.joins = runs(&joins[at]);
+    }
+    scores
+}
+
+/// How two edges sharing a cell should be read.
+fn shared(g: &Graph, one: Ink, other: Ink) -> Shared {
+    if crossing(one.bits, other.bits) {
+        return Shared::Crossing;
+    }
+    let (Some(a), Some(b)) = (g.edge(one.edge), g.edge(other.edge)) else {
+        return Shared::Overlap;
+    };
+    if a.from() == b.from() {
+        Shared::Fork
+    } else if a.to() == b.to() {
+        Shared::Join
+    } else {
+        Shared::Overlap
+    }
+}
+
+/// One straight through sideways and one straight through downward.
+///
+/// Nothing else counts. Two edges meeting at a corner are not passing each
+/// other; they are drawn as one line turning, which is the defect, not the
+/// exception.
+fn crossing(one: u8, other: u8) -> bool {
+    let flat = |bits: u8| bits == L | R;
+    let upright = |bits: u8| bits == U | D;
+    (flat(one) && upright(other)) || (upright(one) && flat(other))
+}
+
+/// How many separate runs a set of cells forms.
+///
+/// Cells that touch side to side or top to bottom are one run. An edge is
+/// allowed one fork and one join — the branch off its source's trunk and the
+/// merge onto its target's — and a second of either means the line is being
+/// read as part of something it is not.
+fn runs(cells: &[(i32, i32)]) -> usize {
+    let mut left: Vec<(i32, i32)> = cells.to_vec();
+    left.sort_unstable();
+    left.dedup();
+    let mut found = 0;
+
+    while let Some(seed) = left.pop() {
+        found += 1;
+        let mut frontier = vec![seed];
+        while let Some((x, y)) = frontier.pop() {
+            for next in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] {
+                if let Some(at) = left.iter().position(|c| *c == next) {
+                    frontier.push(left.remove(at));
+                }
+            }
+        }
+    }
+    found
+}
+
+/// The columns an edge crosses, and the bends that buys it.
+///
+/// Two for a neighbour: out, across, in. Four for a skip, however far: a turn
+/// at each end and a straight run through the middle.
+fn budget(g: &Graph, layout: &Layout, edge: EdgeId) -> (usize, usize) {
+    let span = g
+        .edge(edge)
+        .and_then(|e| Some((layout.boxed(e.from())?, layout.boxed(e.to())?)))
+        .map_or(1, |(from, to)| to.column.saturating_sub(from.column));
+    (span, if span <= 1 { 2 } else { 4 })
+}
+
+/// The fewest bends this route could have had: none if it stays on its row.
+fn fewest(route: &Route) -> usize {
+    match (route.points.first(), route.points.last()) {
+        (Some(first), Some(last)) if first.1 == last.1 => 0,
+        _ => 2,
+    }
+}
+
+/// Vertical cells travelled beyond the rows the edge actually had to cover.
+fn detour(route: &Route) -> i32 {
+    let travelled: i32 = route
+        .points
+        .windows(2)
+        .map(|p| (p[1].1 - p[0].1).abs())
+        .sum();
+    let (Some(first), Some(last)) = (route.points.first(), route.points.last()) else {
+        return 0;
+    };
+    travelled - (last.1 - first.1).abs()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::graph::{Graph, Node};
     use crate::layout;
-    use crate::paint::grid::{D, L, R, U};
 
     fn drawing(nodes: &[&str], edges: &[(usize, usize)]) -> (Graph, Layout) {
         let mut g = Graph::new();
@@ -189,6 +364,125 @@ mod tests {
         }
         assert_eq!(raster.at(-1, -1), []);
         assert_eq!(raster.at(layout.width, 0), []);
+    }
+
+    fn edges(nodes: &[&str], links: &[(usize, usize)]) -> Vec<EdgeScore> {
+        let (g, layout) = drawing(nodes, links);
+        per_edge(&g, &layout, &Raster::of(&layout))
+    }
+
+    #[test]
+    fn a_chain_costs_nothing() {
+        for score in edges(&["a", "b", "c"], &[(0, 1), (1, 2)]) {
+            assert_eq!(score.bends, 0);
+            assert_eq!(score.jogs, 0);
+            assert_eq!(score.detour, 0);
+            assert_eq!((score.forks, score.joins), (0, 0));
+            assert_eq!((score.crossings, score.overlaps), (0, 0));
+            assert_eq!((score.span, score.allowed), (1, 2));
+        }
+    }
+
+    #[test]
+    fn a_branch_of_a_fan_forks_once_and_joins_never() {
+        for score in edges(&["a", "x", "y", "z"], &[(0, 1), (0, 2), (0, 3)]) {
+            assert!(
+                score.forks <= 1,
+                "a branch may leave its trunk once, not {}",
+                score.forks
+            );
+            assert_eq!(score.joins, 0);
+            assert_eq!(
+                score.overlaps, 0,
+                "a fan's own branches are never an overlap"
+            );
+        }
+    }
+
+    #[test]
+    fn a_branch_of_a_fan_in_joins_once_and_forks_never() {
+        for score in edges(&["x", "y", "z", "a"], &[(0, 3), (1, 3), (2, 3)]) {
+            assert!(score.joins <= 1);
+            assert_eq!(score.forks, 0);
+            assert_eq!(score.overlaps, 0);
+        }
+    }
+
+    #[test]
+    fn a_skip_is_allowed_twice_the_bends_of_a_neighbour() {
+        let scored = edges(&["a", "b", "c", "d"], &[(0, 1), (1, 2), (2, 3), (0, 3)]);
+        let long = scored.last().expect("the skip is the last edge");
+        assert_eq!((long.span, long.allowed), (3, 4));
+        assert!(scored[..3].iter().all(|s| s.allowed == 2));
+    }
+
+    #[test]
+    fn two_edges_at_a_right_angle_are_a_crossing_and_not_an_overlap() {
+        assert!(crossing(L | R, U | D));
+        assert!(crossing(U | D, L | R));
+        assert!(!crossing(L | R, L | R));
+        assert!(!crossing(L | D, U | D), "a corner is not passing through");
+        assert!(
+            !crossing(L | R | U, U | D),
+            "a tee is a junction, not a crossing"
+        );
+    }
+
+    #[test]
+    fn touching_cells_are_one_run_and_separated_cells_are_two() {
+        assert_eq!(runs(&[]), 0);
+        assert_eq!(runs(&[(0, 0), (1, 0), (1, 1)]), 1);
+        assert_eq!(runs(&[(0, 0), (0, 0)]), 1);
+        assert_eq!(runs(&[(0, 0), (5, 5)]), 2);
+        assert_eq!(runs(&[(0, 0), (1, 0), (4, 0), (5, 0)]), 2);
+    }
+
+    #[test]
+    fn two_unrelated_edges_in_one_cell_any_other_way_are_an_overlap() {
+        let mut g = Graph::new();
+        let ids: Vec<_> = (0..4)
+            .map(|i| g.add_node(Node::new(format!("n{i}"))))
+            .collect();
+        let one = g.add_edge(ids[0], ids[1]);
+        let other = g.add_edge(ids[2], ids[3]);
+        let flat = |edge| Ink { edge, bits: L | R };
+
+        assert_eq!(shared(&g, flat(one), flat(other)), Shared::Overlap);
+        assert_eq!(
+            shared(
+                &g,
+                flat(one),
+                Ink {
+                    edge: other,
+                    bits: U | D
+                }
+            ),
+            Shared::Crossing,
+            "at a right angle they pass; anywhere else they are one line"
+        );
+    }
+
+    #[test]
+    fn the_diamond_stays_inside_the_vocabulary_and_pays_for_it() {
+        // The frame looks like the skip edge lands on another line. It does not:
+        // everything converging there arrives at the same box, so those cells
+        // are joins. What the skip does cost is the long way round.
+        let scored = edges(
+            &["in", "split", "even", "odd", "sink"],
+            &[(0, 1), (1, 2), (1, 3), (2, 4), (3, 4), (0, 4)],
+        );
+        assert!(
+            scored.iter().all(|s| s.overlaps == 0),
+            "no overlaps here: {scored:?}"
+        );
+        assert!(scored.iter().all(|s| s.bends <= s.allowed));
+        assert!(scored.iter().all(|s| s.forks <= 1 && s.joins <= 1));
+
+        let skip = scored.last().expect("the skip is the last edge");
+        assert!(
+            skip.detour > 0 && skip.jogs > 0,
+            "the skip should be paying something"
+        );
     }
 
     #[test]
