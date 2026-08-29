@@ -332,25 +332,48 @@ impl Score {
     }
 }
 
+impl Score {
+    /// Every number, named, in a fixed order.
+    ///
+    /// One list feeding both the human line and the stored baseline, so a
+    /// baseline can never describe a field the report does not show.
+    pub fn fields(&self) -> [(&'static str, i64); 12] {
+        let count = |n: usize| i64::try_from(n).unwrap_or(i64::MAX);
+        [
+            ("bends_fwd", count(self.bends_over_fwd)),
+            ("bends_skip", count(self.bends_over_skip)),
+            ("junctions", count(self.junction_over)),
+            ("overlaps", count(self.overlaps)),
+            ("cross", count(self.cross_cells)),
+            ("asym", self.asymmetry),
+            ("detour", self.detour),
+            ("jogs", count(self.jogs)),
+            ("ink", count(self.ink)),
+            ("width", i64::from(self.width)),
+            ("height", i64::from(self.height)),
+            ("total", self.total),
+        ]
+    }
+
+    /// The numbers as `key=value` pairs, which is what a baseline holds.
+    pub fn record(&self) -> String {
+        self.fields()
+            .iter()
+            .map(|(name, value)| format!("{name}={value}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
 impl fmt::Display for Score {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "bends>2 {} skip>4 {} junc>1 {} overlap {} | cross {} asym {} detour {} \
-             | jogs {} ink {} {}x{} total {}",
-            self.bends_over_fwd,
-            self.bends_over_skip,
-            self.junction_over,
-            self.overlaps,
-            self.cross_cells,
-            self.asymmetry,
-            self.detour,
-            self.jogs,
-            self.ink,
-            self.width,
-            self.height,
-            self.total,
-        )
+        let mut first = true;
+        for (name, value) in self.fields() {
+            let separator = if first { "" } else { " " };
+            first = false;
+            write!(f, "{separator}{name} {value}")?;
+        }
+        Ok(())
     }
 }
 
@@ -754,6 +777,19 @@ mod tests {
         let line = scored(&["a", "b"], &[(0, 1)]).to_string();
         assert!(!line.contains('\n'));
         assert!(line.contains("total 0"), "{line}");
+    }
+
+    #[test]
+    fn a_record_says_the_same_things_the_line_does() {
+        let s = scored(&["a", "x", "y"], &[(0, 1), (0, 2)]);
+        let record = s.record();
+        for (name, value) in s.fields() {
+            assert!(
+                record.contains(&format!("{name}={value}")),
+                "{name} missing from {record}"
+            );
+        }
+        assert_eq!(record.split(' ').count(), s.fields().len());
     }
 
     #[test]
