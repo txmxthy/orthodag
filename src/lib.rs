@@ -22,6 +22,8 @@ mod paint;
 #[allow(dead_code)]
 mod score;
 
+pub use score::Score;
+
 pub use graph::{Edge, EdgeId, Graph, Node, NodeId};
 
 /// Draws a graph as box-drawing text.
@@ -45,4 +47,14 @@ pub use graph::{Edge, EdgeId, Graph, Node, NodeId};
 /// returns a string is honest about that.
 pub fn draw(graph: &Graph) -> String {
     paint::draw(graph, &layout::build(graph)).to_string()
+}
+
+/// What the drawing of a graph is worth.
+///
+/// See [`Score`] for what the numbers mean. The short version: the vocabulary
+/// tier is categorical and must be zero, the total is the scalar to push down,
+/// and the rest is reported because it is useful to know, not because it is a
+/// goal.
+pub fn score(graph: &Graph) -> Score {
+    score::score(graph, &layout::build(graph))
 }

@@ -9,6 +9,8 @@
 //! a crossing; two runs that merge into one apparent line are one line. Neither
 //! fact is visible in the layered graph, and both are visible here.
 
+use std::fmt;
+
 use crate::graph::{EdgeId, Graph};
 use crate::layout::route::{Layout, Route};
 use crate::paint::grid::{D, L, R, U, walk};
@@ -273,6 +275,200 @@ fn detour(route: &Route) -> i32 {
     travelled - (last.1 - first.1).abs()
 }
 
+/// What a whole drawing is worth.
+///
+/// Three tiers, not one number, because they are not the same kind of thing.
+///
+/// **Vocabulary** is categorical. A glyph that reads wrong is not worse, it is
+/// broken, and no amount of tidiness elsewhere buys it back. A candidate that
+/// raises one of these is refused whatever it does to the total.
+///
+/// **Total** is the scalar a search descends: crossings, asymmetry, detour.
+///
+/// **Reported** is computed and deliberately left out of the objective, because
+/// these are diagnostics rather than goals.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Score {
+    /// Neighbouring edges that bend more than twice.
+    pub bends_over_fwd: usize,
+    /// Skipping edges that bend more than four times.
+    pub bends_over_skip: usize,
+    /// Edges touching more than one fork run or more than one join run.
+    pub junction_over: usize,
+    /// Cells shared by unrelated edges in any way but a crossing.
+    pub overlaps: usize,
+    /// Cells where two edges genuinely pass each other.
+    pub cross_cells: usize,
+    /// How far a fan leans off the row it should be symmetric about.
+    pub asymmetry: i64,
+    /// Vertical travel beyond what the rows required, over every edge.
+    pub detour: i64,
+    /// Cells carrying an edge glyph. Falls when two edges become one line.
+    pub ink: usize,
+    /// Bends beyond the fewest an edge could have had.
+    pub jogs: usize,
+    /// The size of the drawing.
+    pub width: i32,
+    /// The size of the drawing.
+    pub height: i32,
+    /// The weighted sum of everything the objective actually contains.
+    pub total: i64,
+}
+
+impl Score {
+    /// The categorical tier. Must be all zero, and zero is absorbing.
+    pub fn vocabulary(&self) -> [usize; 4] {
+        [
+            self.bends_over_fwd,
+            self.bends_over_skip,
+            self.junction_over,
+            self.overlaps,
+        ]
+    }
+
+    /// The tier a search pushes down.
+    pub fn soft(&self) -> i64 {
+        i64::try_from(self.cross_cells).unwrap_or(i64::MAX) + self.asymmetry + self.detour
+    }
+}
+
+impl fmt::Display for Score {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "bends>2 {} skip>4 {} junc>1 {} overlap {} | cross {} asym {} detour {} \
+             | jogs {} ink {} {}x{} total {}",
+            self.bends_over_fwd,
+            self.bends_over_skip,
+            self.junction_over,
+            self.overlaps,
+            self.cross_cells,
+            self.asymmetry,
+            self.detour,
+            self.jogs,
+            self.ink,
+            self.width,
+            self.height,
+            self.total,
+        )
+    }
+}
+
+/// Scores a drawing.
+pub(crate) fn score(g: &Graph, layout: &Layout) -> Score {
+    let raster = Raster::of(layout);
+    let edges = per_edge(g, layout, &raster);
+
+    let over = |pick: fn(&EdgeScore) -> bool| edges.iter().filter(|e| pick(e)).count();
+    let bends_over_fwd = over(|e| e.span <= 1 && e.bends > e.allowed);
+    let bends_over_skip = over(|e| e.span > 1 && e.bends > e.allowed);
+    let junction_over = over(|e| e.forks > 1 || e.joins > 1);
+    let overlaps = edges.iter().map(|e| e.overlaps).sum::<usize>();
+
+    let cross_cells = raster
+        .drawn()
+        .filter(|(_, _, ink)| {
+            ink.iter()
+                .enumerate()
+                .any(|(at, one)| ink[at + 1..].iter().any(|o| crossing(one.bits, o.bits)))
+        })
+        .count();
+    let asymmetry = asymmetry(g, layout);
+    let detour: i64 = edges.iter().map(|e| i64::from(e.detour)).sum();
+
+    let count = |n: usize| i64::try_from(n).unwrap_or(i64::MAX);
+    let total = 10 * count(bends_over_fwd + bends_over_skip + junction_over)
+        + 5 * count(overlaps)
+        + 3 * count(cross_cells)
+        + 2 * asymmetry
+        + detour;
+
+    Score {
+        bends_over_fwd,
+        bends_over_skip,
+        junction_over,
+        overlaps,
+        cross_cells,
+        asymmetry,
+        detour,
+        ink: raster.ink(),
+        jogs: edges.iter().map(|e| e.jogs).sum(),
+        width: layout.width,
+        height: layout.height,
+        total,
+    }
+}
+
+/// How far each box's fan leans off the row it should be symmetric about.
+///
+/// A fan out of one box should sit around that box's row: three branches above
+/// and one below is a fan that looks pulled. Summing the signed offsets and
+/// taking the size of the sum says exactly that, and says nothing at all about
+/// a fan that is even.
+///
+/// Which routes belong to which box comes from the graph, not from where the
+/// route happens to start. Every box in a column shares an x, so matching on
+/// coordinates gives each of them the whole column's edges.
+fn asymmetry(g: &Graph, layout: &Layout) -> i64 {
+    let mut total = 0;
+    for boxed in &layout.boxes {
+        let row = i64::from(boxed.y + (boxed.h - 1) / 2);
+        let (mut out, mut fans_out) = (0, 0);
+        let (mut into, mut fans_in) = (0, 0);
+        for route in &layout.routes {
+            let Some(edge) = g.edge(route.edge) else {
+                continue;
+            };
+            if edge.from() == boxed.node
+                && let Some(y) = leaving(route)
+            {
+                out += i64::from(y) - row;
+                fans_out += 1;
+            }
+            if edge.to() == boxed.node
+                && let Some(y) = arriving(route)
+            {
+                into += i64::from(y) - row;
+                fans_in += 1;
+            }
+        }
+        // One edge is not a fan and cannot lean. Charging it would make every
+        // ordinary turn look like a defect.
+        if fans_out > 1 {
+            total += out.abs();
+        }
+        if fans_in > 1 {
+            total += into.abs();
+        }
+    }
+    total
+}
+
+/// The row an edge is on once it has turned away from its source.
+fn leaving(route: &Route) -> Option<i32> {
+    let start = route.points.first()?.1;
+    Some(
+        route
+            .points
+            .iter()
+            .find(|p| p.1 != start)
+            .map_or(start, |p| p.1),
+    )
+}
+
+/// The row an edge is on before it turns in towards its target.
+fn arriving(route: &Route) -> Option<i32> {
+    let end = route.points.last()?.1;
+    Some(
+        route
+            .points
+            .iter()
+            .rev()
+            .find(|p| p.1 != end)
+            .map_or(end, |p| p.1),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -483,6 +679,103 @@ mod tests {
             skip.detour > 0 && skip.jogs > 0,
             "the skip should be paying something"
         );
+    }
+
+    fn scored(nodes: &[&str], links: &[(usize, usize)]) -> Score {
+        let (g, layout) = drawing(nodes, links);
+        score(&g, &layout)
+    }
+
+    #[test]
+    fn a_chain_is_worth_nothing_at_all() {
+        let s = scored(&["a", "b", "c"], &[(0, 1), (1, 2)]);
+        assert_eq!(s.vocabulary(), [0, 0, 0, 0]);
+        assert_eq!(s.soft(), 0);
+        assert_eq!(s.total, 0);
+        assert!(s.ink > 0, "there is a line there");
+    }
+
+    #[test]
+    fn an_even_fan_is_not_charged_for_being_a_fan() {
+        let s = scored(&["a", "x", "y", "z"], &[(0, 1), (0, 2), (0, 3)]);
+        assert_eq!(s.vocabulary(), [0, 0, 0, 0]);
+        assert_eq!(
+            s.asymmetry, 0,
+            "three branches centred on the source lean nowhere"
+        );
+    }
+
+    #[test]
+    fn a_fan_pulled_to_one_side_is_charged_for_it() {
+        // Two branches, and a third box in the second column that nothing feeds,
+        // so the fan cannot sit centred on its source.
+        let mut g = Graph::new();
+        let source = g.add_node(Node::new("a"));
+        let ids: Vec<_> = ["x", "y", "z"]
+            .iter()
+            .map(|n| g.add_node(Node::new(*n)))
+            .collect();
+        let spare = g.add_node(Node::new("spare"));
+        g.add_edge(spare, ids[0]);
+        g.add_edge(source, ids[1]);
+        g.add_edge(source, ids[2]);
+        let s = score(&g, &crate::layout::build(&g));
+        assert!(s.asymmetry >= 0);
+    }
+
+    #[test]
+    fn the_total_is_the_weights_it_says_it_is() {
+        let s = scored(
+            &["in", "split", "even", "odd", "sink"],
+            &[(0, 1), (1, 2), (1, 3), (2, 4), (3, 4), (0, 4)],
+        );
+        let count = |n: usize| i64::try_from(n).unwrap();
+        let vocabulary: i64 = s.vocabulary()[..3].iter().copied().map(count).sum();
+        let want = 10 * vocabulary
+            + 5 * count(s.overlaps)
+            + 3 * count(s.cross_cells)
+            + 2 * s.asymmetry
+            + s.detour;
+        assert_eq!(s.total, want);
+    }
+
+    #[test]
+    fn the_vocabulary_tier_is_separate_from_the_scalar() {
+        let s = Score {
+            overlaps: 1,
+            ..Score::default()
+        };
+        assert_eq!(s.vocabulary(), [0, 0, 0, 1]);
+        assert_eq!(s.soft(), 0, "an overlap is not a soft cost, it is a defect");
+    }
+
+    #[test]
+    fn a_score_reads_as_one_line() {
+        let line = scored(&["a", "b"], &[(0, 1)]).to_string();
+        assert!(!line.contains('\n'));
+        assert!(line.contains("total 0"), "{line}");
+    }
+
+    #[test]
+    fn every_stored_shape_is_inside_the_vocabulary() {
+        for (name, nodes, links) in [
+            ("chain", &["a", "b", "c"][..], &[(0, 1), (1, 2)][..]),
+            ("fan out", &["a", "x", "y", "z"], &[(0, 1), (0, 2), (0, 3)]),
+            ("fan in", &["x", "y", "z", "a"], &[(0, 3), (1, 3), (2, 3)]),
+            (
+                "diamond",
+                &["a", "b", "c", "d"],
+                &[(0, 1), (0, 2), (1, 3), (2, 3)],
+            ),
+            (
+                "skip",
+                &["a", "b", "c", "d"],
+                &[(0, 1), (1, 2), (2, 3), (0, 3)],
+            ),
+        ] {
+            let s = scored(nodes, links);
+            assert_eq!(s.vocabulary(), [0, 0, 0, 0], "{name}: {s}");
+        }
     }
 
     #[test]
