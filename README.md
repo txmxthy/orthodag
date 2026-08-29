@@ -60,14 +60,30 @@ colour a flow keeps across the drawing.
 | ordering, coordinates, routing | next |
 | the painter | done — direction bits, one glyph per combination |
 | tracks, ports, colour | next |
-| the scorer and the quality gate | not started |
+| the scorer and the quality gate | done — two of nine fixtures still fail it |
 
-`draw` is the only entry point so far, and it returns a `String`. The
-design calls for layout, drawing and scoring as three separate calls, so a
-caller can colour one edge or ask what a drawing is worth, though none of
-that exists yet.
+`draw` and `score` are the entry points so far, and `draw` returns a
+`String`. The design calls for layout, drawing and scoring as three
+separate calls, so a caller can colour one edge or ask what a drawing is
+worth, though none of that exists yet.
 
-Run `cargo run --example draw` to see the drawings above and a couple more.
+Run `cargo run --example draw` to see the drawings above and a couple more,
+and `cargo run --example score` to see what each of them is worth.
+
+## Scoring
+
+There is an explicit objective, in three tiers: defects that are
+categorical and must be zero, a scalar to push down, and numbers reported
+because they are useful to know rather than because they are goals.
+
+```
+chain     bends_fwd 0 bends_skip 0 junctions 0 overlaps 0 ... total 0
+ladder    bends_fwd 0 bends_skip 0 junctions 0 overlaps 32 ... total 244
+```
+
+Thirty-two overlaps in that ladder are thirty-two cells where two unrelated
+edges are drawn as one line, and the frame alone does not show that.
+[docs/quality.md](docs/quality.md) has the rules and the loop.
 
 ## Building
 

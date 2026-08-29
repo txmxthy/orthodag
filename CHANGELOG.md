@@ -22,3 +22,7 @@ nothing is released yet.
 - The painter: four direction bits per cell, one glyph per combination, boxes
   and labels laid over the lines.
 - `draw(&Graph) -> String`, the first thing here that produces output.
+- The scorer: per-edge bends, forks, joins, crossings, overlaps and detour,
+  counted on the drawn cells, in three tiers.
+- `score(&Graph) -> Score`, an example that prints every fixture worst-first,
+  and a ratchet test against a stored baseline.
