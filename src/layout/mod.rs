@@ -11,6 +11,7 @@ mod order;
 mod place;
 mod rank;
 pub(crate) mod route;
+mod track;
 
 use crate::graph::{EdgeId, Graph, NodeId};
 

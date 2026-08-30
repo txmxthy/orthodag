@@ -48,12 +48,11 @@ Seven of the nine fixtures are inside the vocabulary. Two are not:
 
 | Fixture | Defect |
 |---|---|
-| `ladder` | 32 overlaps: unrelated long edges share rows and turn in the same column |
-| `two-tags` | 4 overlaps: the same, on a smaller scale |
+| `ladder` | 4 overlaps: two runs still turning on the same cells |
+| `two-tags` | 4 overlaps: the same |
 
-Currently a vertical run turns wherever its midpoint happens to fall. Track
-packing would give each run a channel of its own in the gap. That is the
-next milestone, and it is why the scorer came first.
+Both were much worse before tracks. What remains needs runs that meet at
+an end to share a channel, so a fan's branches read as one trunk.
 
 `tests/quality.rs` lists the fixtures known to be clean, in `CLEAN`. A
 fixture that reaches zero is added to that list and never removed.
@@ -73,6 +72,13 @@ produce one before their build passes.
 
 The vocabulary tier must not rise for any fixture. The soft tier may rise a
 little for one fixture, as long as the total across every fixture falls.
+
+The test does not decide this for you: the tiers are ordered, so a change
+that clears a vocabulary defect can be worth taking even when the soft
+tier rises, because a defect is categorical and a soft cost is not. Track
+packing was exactly that trade: it took overlaps from 36 to 8, while the
+soft tier rose by nine. Accept a trade like that deliberately, and record
+it in the commit. Do not weaken the test so it stops asking the question.
 
 Do not edit the scorer, the fixtures, the clean list, or the baseline
 merely to make a change pass. If the objective itself is wrong, make that

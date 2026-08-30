@@ -10,17 +10,24 @@
 //! middle, because the placeholder rows it runs on are all the same row. Four
 //! bends at most, whatever the skip.
 //!
-//! Where in the gap an edge turns is decided here by putting it in the middle.
-//! That is the placeholder for track packing, which is what actually decides it.
+//! Where in the gap an edge turns is not a free choice. Two edges turning on the
+//! same column of cells are drawn as one line, so every vertical run takes a
+//! track of its own — see [`super::track`] — and the gap is made wide enough to
+//! hold them.
 
 use super::acyclic::Acyclic;
 use super::layer::Slot;
 use super::order::Columns;
 use super::place::Placed;
+use super::track::{Run, Tracks, pack};
 use crate::graph::{EdgeId, Graph, NodeId};
 
-/// Blank columns between one column of boxes and the next.
-const GAP: i32 = 5;
+/// The fewest blank columns between one column of boxes and the next.
+const MIN_GAP: i32 = 5;
+
+/// A cell of clearance either side of a gap's tracks: the stub out of the box
+/// on one side, and room for the arrowhead on the other.
+const CLEARANCE: usize = 2;
 
 /// Padding inside a box: two borders and a space either side of the text.
 const PADDING: i32 = 4;
@@ -38,18 +45,6 @@ pub(crate) struct Boxed {
     pub(crate) y: i32,
     pub(crate) w: i32,
     pub(crate) h: i32,
-}
-
-impl Boxed {
-    /// The cell just past the right border, where an edge leaves.
-    fn exit(self) -> i32 {
-        self.x + self.w
-    }
-
-    /// The cell just before the left border, where an edge arrives.
-    fn entry(self) -> i32 {
-        self.x - 1
-    }
 }
 
 /// One edge as an orthogonal polyline, corner to corner.
@@ -82,56 +77,62 @@ impl Layout {
     }
 }
 
-/// The finished geometry, before any line is drawn through it.
+/// The row an edge is on at each column it touches, source to target.
 ///
-/// Not a context object: nothing here is mutated, and it exists so the two
-/// functions that need all five pieces can say so once instead of taking eight
-/// arguments each.
-struct Frame<'a> {
-    columns: &'a Columns,
-    placed: &'a Placed,
-    boxes: Vec<Boxed>,
-    lefts: Vec<i32>,
-    widths: Vec<i32>,
+/// Rows are settled before any x is, because they have to be: how wide a gap
+/// needs to be depends on how many runs cross it, and which runs cross it
+/// depends on which edges change row there.
+struct Path {
+    edge: EdgeId,
+    first: usize,
+    rows: Vec<i32>,
+    from: NodeId,
+    to: NodeId,
 }
 
-impl Frame<'_> {
-    fn left(&self, column: usize) -> i32 {
-        self.lefts.get(column).copied().unwrap_or(0)
-    }
-
-    fn width(&self, column: usize) -> i32 {
-        self.widths.get(column).copied().unwrap_or(MIN_WIDTH)
-    }
-
-    fn boxed(&self, node: NodeId) -> Option<&Boxed> {
-        self.boxes.iter().find(|b| b.node == node)
+impl Path {
+    /// The slot this edge occupies in one of its columns.
+    fn slot(&self, column: usize) -> Slot {
+        if column == self.first {
+            Slot::Node(self.from)
+        } else if column + 1 == self.first + self.rows.len() {
+            Slot::Node(self.to)
+        } else {
+            Slot::Pass(self.edge)
+        }
     }
 }
 
 /// Lays out the boxes and routes every edge that has a path across the columns.
 pub(crate) fn route(g: &Graph, acyclic: &Acyclic, columns: &Columns, placed: &Placed) -> Layout {
     let widths = widths(g, columns);
-    let lefts = lefts(&widths);
-    let boxes = boxes(columns, placed, &widths, &lefts);
-    let frame = Frame {
-        columns,
-        placed,
-        boxes,
-        lefts,
-        widths,
-    };
+    let paths = paths(g, acyclic, columns, placed);
+    let runs = runs(&paths);
+    let tracks = pack(&runs, columns.len().saturating_sub(1));
 
-    let width = frame
-        .lefts
+    let gaps = gaps(&tracks, columns.len());
+    let lefts = lefts(&widths, &gaps);
+    let boxes = boxes(columns, placed, &widths, &lefts);
+
+    let routes = paths
         .iter()
-        .zip(&frame.widths)
+        .filter_map(|path| {
+            let points = polyline(path, &runs, &tracks, &lefts, &widths)?;
+            Some(Route {
+                edge: path.edge,
+                points,
+            })
+        })
+        .collect();
+
+    let width = lefts
+        .iter()
+        .zip(&widths)
         .map(|(x, w)| x + w)
         .max()
         .unwrap_or(0);
-    let routes = routes(g, acyclic, &frame);
     Layout {
-        boxes: frame.boxes,
+        boxes,
         routes,
         width,
         height: placed.height(),
@@ -167,14 +168,92 @@ fn widths(g: &Graph, columns: &Columns) -> Vec<i32> {
         .collect()
 }
 
+/// The row every forward edge is on at each of its columns.
+fn paths(g: &Graph, acyclic: &Acyclic, columns: &Columns, placed: &Placed) -> Vec<Path> {
+    g.edge_ids()
+        .filter(|id| !acyclic.is_back(*id))
+        .filter_map(|id| {
+            let edge = g.edge(id)?;
+            let (from, to) = (edge.from(), edge.to());
+            let first = column_of(columns, Slot::Node(from))?;
+            let last = column_of(columns, Slot::Node(to))?;
+            if last <= first {
+                return None;
+            }
+            let rows = (first..=last)
+                .map(|column| {
+                    let slot = if column == first {
+                        Slot::Node(from)
+                    } else if column == last {
+                        Slot::Node(to)
+                    } else {
+                        Slot::Pass(id)
+                    };
+                    let at = columns.get(column)?.iter().position(|s| *s == slot)?;
+                    Some(placed.middle(column, at))
+                })
+                .collect::<Option<Vec<_>>>()?;
+            Some(Path {
+                edge: id,
+                first,
+                rows,
+                from,
+                to,
+            })
+        })
+        .collect()
+}
+
+/// Which column a slot is in.
+fn column_of(columns: &Columns, slot: Slot) -> Option<usize> {
+    columns.iter().position(|slots| slots.contains(&slot))
+}
+
+/// Every vertical run every path needs, in path order then gap order.
+///
+/// A hop that stays on its row needs none: it is drawn as one straight line and
+/// nothing has to make room for it.
+fn runs(paths: &[Path]) -> Vec<Run> {
+    let mut runs = Vec::new();
+    for path in paths {
+        for (step, pair) in path.rows.windows(2).enumerate() {
+            let [from_row, to_row] = *pair else { continue };
+            if from_row == to_row {
+                continue;
+            }
+            let gap = path.first + step;
+            runs.push(Run {
+                edge: path.edge,
+                gap,
+                lo: from_row.min(to_row),
+                hi: from_row.max(to_row),
+                from: path.slot(gap),
+                to: path.slot(gap + 1),
+            });
+        }
+    }
+    runs
+}
+
+/// How wide each gap has to be to hold its tracks.
+fn gaps(tracks: &Tracks, columns: usize) -> Vec<i32> {
+    (0..columns.saturating_sub(1))
+        .map(|gap| {
+            let needed = i32::try_from(tracks.count(gap) + CLEARANCE).unwrap_or(MIN_GAP);
+            needed.max(MIN_GAP)
+        })
+        .collect()
+}
+
 /// The left edge of each column.
-fn lefts(widths: &[i32]) -> Vec<i32> {
+fn lefts(widths: &[i32], gaps: &[i32]) -> Vec<i32> {
     let mut x = 0;
     widths
         .iter()
-        .map(|w| {
+        .enumerate()
+        .map(|(column, w)| {
             let at = x;
-            x += w + GAP;
+            x += w + gaps.get(column).copied().unwrap_or(MIN_GAP);
             at
         })
         .collect()
@@ -198,50 +277,44 @@ fn boxes(columns: &Columns, placed: &Placed, widths: &[i32], lefts: &[i32]) -> V
     boxes
 }
 
-/// Every cell an edge is anchored to, left to right: box, placeholders, box.
-///
-/// `x` is where the line is at that point and `y` is the row it is on. For a
-/// box that is the cell outside its border; for a placeholder it is the middle
-/// of the gap the edge is crossing.
-fn anchors(frame: &Frame, edge: EdgeId, from: NodeId, to: NodeId) -> Option<Vec<(i32, i32)>> {
-    let source = frame.boxed(from)?;
-    let target = frame.boxed(to)?;
-    let mut anchors = vec![(source.exit(), source.y + (source.h - 1) / 2)];
+/// Joins the rows of a path, turning on the track each of its runs was given.
+fn polyline(
+    path: &Path,
+    runs: &[Run],
+    tracks: &Tracks,
+    lefts: &[i32],
+    widths: &[i32],
+) -> Option<Vec<(i32, i32)>> {
+    let last = path.first + path.rows.len() - 1;
+    let exit = lefts
+        .get(path.first)?
+        .checked_add(*widths.get(path.first)?)?;
+    let entry = lefts.get(last)?.checked_sub(1)?;
 
-    for (column, slots) in frame.columns.iter().enumerate() {
-        for (at, slot) in slots.iter().enumerate() {
-            if *slot != Slot::Pass(edge) {
-                continue;
-            }
-            let row = frame.placed.middle(column, at);
-            anchors.push((frame.left(column), row));
-            anchors.push((frame.left(column) + frame.width(column) - 1, row));
+    let mut points = vec![(exit, *path.rows.first()?)];
+    for (step, pair) in path.rows.windows(2).enumerate() {
+        let [from_row, to_row] = *pair else { continue };
+        if from_row == to_row {
+            continue;
         }
+        let gap = path.first + step;
+        let track = runs
+            .iter()
+            .position(|run| run.edge == path.edge && run.gap == gap)
+            .map_or(0, |run| tracks.of(run));
+        let x = track_x(lefts, widths, gap, track);
+        points.push((x, from_row));
+        points.push((x, to_row));
     }
-
-    anchors.push((target.entry(), target.y + (target.h - 1) / 2));
-    Some(anchors)
+    points.push((entry, *path.rows.last()?));
+    Some(collapse(points))
 }
 
-/// Joins consecutive anchors with an L, a Z, or a straight run.
-fn polyline(anchors: &[(i32, i32)]) -> Vec<(i32, i32)> {
-    let mut points: Vec<(i32, i32)> = Vec::new();
-    for pair in anchors.windows(2) {
-        let [(x0, y0), (x1, y1)] = *pair else {
-            continue;
-        };
-        if points.is_empty() {
-            points.push((x0, y0));
-        }
-        if y0 != y1 {
-            // Turn halfway across, which is what a track will decide properly.
-            let turn = x0 + (x1 - x0) / 2;
-            points.push((turn, y0));
-            points.push((turn, y1));
-        }
-        points.push((x1, y1));
-    }
-    collapse(points)
+/// Where one track of one gap sits: a cell clear of the box, then one per track.
+fn track_x(lefts: &[i32], widths: &[i32], gap: usize, track: usize) -> i32 {
+    let start =
+        lefts.get(gap).copied().unwrap_or(0) + widths.get(gap).copied().unwrap_or(MIN_WIDTH);
+    start + 1 + i32::try_from(track).unwrap_or(0)
 }
 
 /// Drops the points that do not turn.
@@ -263,40 +336,9 @@ fn collapse(points: Vec<(i32, i32)>) -> Vec<(i32, i32)> {
     kept
 }
 
-/// One route per forward edge whose two boxes are both in the drawing.
-///
-/// A back edge gets none: it is drawn later through a lane under the boxes, and
-/// giving it a left-to-right route here would point it the wrong way.
-fn routes(g: &Graph, acyclic: &Acyclic, frame: &Frame) -> Vec<Route> {
-    g.edge_ids()
-        .filter(|id| !acyclic.is_back(*id))
-        .filter_map(|id| {
-            let edge = g.edge(id)?;
-            let anchors = anchors(frame, id, edge.from(), edge.to())?;
-            Some(Route {
-                edge: id,
-                points: polyline(&anchors),
-            })
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_line_that_does_not_turn_keeps_two_points() {
-        assert_eq!(polyline(&[(0, 3), (9, 3)]), [(0, 3), (9, 3)]);
-    }
-
-    #[test]
-    fn a_line_that_changes_row_turns_twice() {
-        assert_eq!(
-            polyline(&[(0, 1), (8, 5)]),
-            [(0, 1), (4, 1), (4, 5), (8, 5)]
-        );
-    }
 
     #[test]
     fn collinear_points_are_dropped() {
@@ -307,5 +349,21 @@ mod tests {
     #[test]
     fn a_repeated_point_is_dropped() {
         assert_eq!(collapse(vec![(0, 0), (0, 0), (5, 0)]), [(0, 0), (5, 0)]);
+    }
+
+    #[test]
+    fn a_gap_is_never_narrower_than_the_minimum() {
+        assert_eq!(gaps(&Tracks::default(), 3), [MIN_GAP, MIN_GAP]);
+    }
+
+    #[test]
+    fn a_track_sits_clear_of_the_box_it_leaves() {
+        let (widths, gaps) = (vec![6, 6], vec![5]);
+        let lefts = lefts(&widths, &gaps);
+        assert_eq!(lefts, [0, 11]);
+        // The box occupies 0..5, so 6 is the first free cell and the first
+        // track is one clear of that.
+        assert_eq!(track_x(&lefts, &widths, 0, 0), 7);
+        assert_eq!(track_x(&lefts, &widths, 0, 1), 8);
     }
 }
