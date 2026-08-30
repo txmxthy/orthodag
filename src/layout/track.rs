@@ -26,9 +26,23 @@ pub(crate) struct Run {
 }
 
 impl Run {
-    /// Whether two runs can sit on the same column of cells.
+    /// Whether their row intervals miss each other entirely.
     fn clear_of(self, other: Self) -> bool {
         self.hi < other.lo || other.hi < self.lo
+    }
+
+    /// Whether they leave the same slot or arrive at the same one.
+    ///
+    /// Two such runs overlapping on a track is not two lines drawn as one — it
+    /// *is* one line, the trunk they share, with a branch off it. Forbidding it
+    /// gives a fan a track per branch and draws it as a comb.
+    fn meets(self, other: Self) -> bool {
+        self.from == other.from || self.to == other.to
+    }
+
+    /// Whether two runs can sit on the same column of cells.
+    fn may_share(self, other: Self) -> bool {
+        self.clear_of(other) || self.meets(other)
     }
 }
 
@@ -54,8 +68,8 @@ impl Tracks {
 /// Packs every run onto the leftmost track that has room for it.
 ///
 /// Runs are taken in a fixed order — top of the drawing first, then by edge —
-/// so the packing is the same every run, and a run only ever joins a track
-/// where it does not touch what is already there.
+/// so the packing is the same every run, and a run only joins a track where it
+/// either misses everything already there or meets it at an end.
 pub(crate) fn pack(runs: &[Run], gaps: usize) -> Tracks {
     let mut order: Vec<usize> = (0..runs.len()).collect();
     order.sort_by_key(|at| runs.get(*at).map(|r| (r.gap, r.lo, r.hi, r.edge)));
@@ -72,7 +86,7 @@ pub(crate) fn pack(runs: &[Run], gaps: usize) -> Tracks {
 
         let free = gap
             .iter()
-            .position(|track| track.iter().all(|held| runs[*held].clear_of(*run)));
+            .position(|track| track.iter().all(|held| runs[*held].may_share(*run)));
         let track = free.unwrap_or_else(|| {
             gap.push(Vec::new());
             gap.len() - 1
@@ -138,6 +152,39 @@ mod tests {
             run(1, 3, 6, node(2), node(3)),
         ];
         assert_eq!(pack(&runs, 1).count(0), 2);
+    }
+
+    #[test]
+    fn runs_that_overlap_but_leave_the_same_slot_share_a_track() {
+        let source = node(0);
+        let runs = [
+            run(0, 0, 5, source, node(1)),
+            run(1, 3, 8, source, node(2)),
+            run(2, 1, 9, source, node(3)),
+        ];
+        let tracks = pack(&runs, 1);
+        assert_eq!(tracks.count(0), 1, "a fan out of one box is one trunk");
+        assert_eq!((tracks.of(0), tracks.of(1)), (tracks.of(2), tracks.of(2)));
+    }
+
+    #[test]
+    fn runs_that_overlap_but_arrive_at_the_same_slot_share_a_track() {
+        let sink = node(9);
+        let runs = [run(0, 0, 5, node(0), sink), run(1, 3, 8, node(1), sink)];
+        assert_eq!(pack(&runs, 1).count(0), 1);
+    }
+
+    #[test]
+    fn meeting_at_an_end_does_not_excuse_an_unrelated_third_run() {
+        let source = node(0);
+        let runs = [
+            run(0, 0, 5, source, node(1)),
+            run(1, 3, 8, source, node(2)),
+            run(2, 2, 7, node(5), node(6)),
+        ];
+        let tracks = pack(&runs, 1);
+        assert_eq!(tracks.of(0), tracks.of(1));
+        assert_ne!(tracks.of(2), tracks.of(0));
     }
 
     #[test]
