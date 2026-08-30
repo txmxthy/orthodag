@@ -225,8 +225,8 @@ fn runs(paths: &[Path]) -> Vec<Run> {
             runs.push(Run {
                 edge: path.edge,
                 gap,
-                lo: from_row.min(to_row),
-                hi: from_row.max(to_row),
+                enter: from_row,
+                leave: to_row,
                 from: path.slot(gap),
                 to: path.slot(gap + 1),
             });
