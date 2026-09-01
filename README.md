@@ -59,7 +59,8 @@ colour a flow keeps across the drawing.
 | layer assignment | done — longest path, one column past the latest predecessor |
 | ordering, coordinates, routing | next |
 | the painter | done — direction bits, one glyph per combination |
-| tracks, ports, colour | next |
+| tracks | done — a fan is one trunk with a branch each |
+| ports, colour | next |
 | the scorer and the quality gate | done — two of nine fixtures still fail it |
 
 `draw` and `score` are the entry points so far, and `draw` returns a
@@ -78,12 +79,13 @@ because they are useful to know rather than because they are goals.
 
 ```
 chain     bends_fwd 0 bends_skip 0 junctions 0 overlaps 0 ... total 0
-ladder    bends_fwd 0 bends_skip 0 junctions 0 overlaps 32 ... total 244
+ladder    bends_fwd 0 bends_skip 0 junctions 0 overlaps 4 ... total 110
 ```
 
-Thirty-two overlaps in that ladder are thirty-two cells where two unrelated
-edges are drawn as one line, and the frame alone does not show that.
-[docs/quality.md](docs/quality.md) has the rules and the loop.
+An overlap is a cell where two unrelated edges are drawn as one line. The
+ladder had thirty-two of them before the gaps were given tracks, and the
+frame alone did not show that. [docs/quality.md](docs/quality.md) has the
+rules and the loop.
 
 ## Building
 

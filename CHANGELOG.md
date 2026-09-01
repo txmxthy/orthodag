@@ -26,3 +26,6 @@ nothing is released yet.
   counted on the drawn cells, in three tiers.
 - `score(&Graph) -> Score`, an example that prints every fixture worst-first,
   and a ratchet test against a stored baseline.
+- Track packing: every vertical run takes a channel of its own in the gap,
+  except where two runs meet at an end and are one trunk. Tracks are ordered
+  left to right by an exact search while there are few of them.
