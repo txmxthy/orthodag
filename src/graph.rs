@@ -18,11 +18,26 @@ impl NodeId {
     pub(crate) fn index(self) -> usize {
         self.0 as usize
     }
+
+    /// The id at a position, for a test standing one phase up on its own.
+    ///
+    /// Test-only: outside a test the only way to get an id is to add the thing
+    /// it names, which is the point of the newtype.
+    #[cfg(test)]
+    pub(crate) fn from_index(at: usize) -> Self {
+        Self(u32::try_from(at).unwrap_or(u32::MAX))
+    }
 }
 
 impl EdgeId {
     pub(crate) fn index(self) -> usize {
         self.0 as usize
+    }
+
+    /// The id at a position. See [`NodeId::from_index`].
+    #[cfg(test)]
+    pub(crate) fn from_index(at: usize) -> Self {
+        Self(u32::try_from(at).unwrap_or(u32::MAX))
     }
 }
 
