@@ -68,7 +68,7 @@ fn every_fixture_that_is_not_clean_is_named() {
         .filter(|(_, s)| s.vocabulary() != [0; 4])
         .map(|(name, _)| name.clone())
         .collect();
-    let expected = ["ladder", "two-tags"];
+    let expected = ["ladder"];
 
     assert_eq!(
         known, expected,

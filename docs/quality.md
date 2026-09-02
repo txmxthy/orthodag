@@ -44,15 +44,17 @@ of a merge.
 
 ## Committed fixtures
 
-Seven of the nine fixtures are inside the vocabulary. Two are not:
+Eight of the nine fixtures are inside the vocabulary. One is not:
 
 | Fixture | Defect |
 |---|---|
-| `ladder` | 4 overlaps: two runs still turning on the same cells |
-| `two-tags` | 4 overlaps: the same |
+| `ladder` | 4 overlaps: two runs turning on each other's corner rows |
 
-Both were much worse before tracks. What remains needs runs that meet at
-an end to share a channel, so a fan's branches read as one trunk.
+`ladder`'s edges carry no tags, so every edge at a box shares the one
+attach row the empty tag set gets, and the rows that would separate the
+two runs do not exist. Giving an untagged fan rows of its own is the
+obvious next move. It is not in the design as written, and it needs an
+argument first.
 
 `tests/quality.rs` lists the fixtures known to be clean, in `CLEAN`. A
 fixture that reaches zero is added to that list and never removed.

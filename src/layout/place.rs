@@ -72,22 +72,25 @@ impl Placed {
     }
 }
 
-/// How tall a box is: the two borders, the headline, and any further lines.
-fn node_height(g: &Graph, slot: Slot) -> i32 {
+/// How tall a box is: the two borders, and an interior big enough for both the
+/// text and the attach rows its flows need.
+fn node_height(g: &Graph, interiors: &[usize], slot: Slot) -> i32 {
     match slot {
         Slot::Node(id) => {
             let lines = g.node(id).map_or(0, |n| n.lines().len());
-            2 + 1 + i32::try_from(lines).unwrap_or(i32::MAX - 3)
+            let text = 1 + i32::try_from(lines).unwrap_or(i32::MAX - 3);
+            let ports = interiors.get(id.index()).copied().unwrap_or(1);
+            2 + text.max(i32::try_from(ports).unwrap_or(1))
         }
         Slot::Pass(_) => 1,
     }
 }
 
 /// Places every slot, sweeping medians until the budget runs out.
-pub(crate) fn place(g: &Graph, columns: &Columns, hops: &Hops) -> Placed {
+pub(crate) fn place(g: &Graph, columns: &Columns, hops: &Hops, interiors: &[usize]) -> Placed {
     let heights: Vec<Vec<i32>> = columns
         .iter()
-        .map(|c| c.iter().map(|s| node_height(g, *s)).collect())
+        .map(|c| c.iter().map(|s| node_height(g, interiors, *s)).collect())
         .collect();
     let height = heights.iter().map(|c| natural(c)).max().unwrap_or(0);
     let mut placed = Placed {
@@ -428,7 +431,7 @@ mod tests {
         let layered = layer(&g, &adj, &acyclic, &ranked);
         let hops = Hops::of(&layered);
         let columns = layered.all().to_vec();
-        let placed = place(&g, &columns, &hops);
+        let placed = place(&g, &columns, &hops, &[]);
         Case {
             g,
             ids,
@@ -544,7 +547,7 @@ mod tests {
         let ranked = rank(&g, &adj, &acyclic);
         let layered = layer(&g, &adj, &acyclic, &ranked);
         let columns = layered.all().to_vec();
-        let placed = place(&g, &columns, &Hops::of(&layered));
+        let placed = place(&g, &columns, &Hops::of(&layered), &[]);
 
         assert_eq!(placed.height_of(0, 0), 3);
         assert_eq!(placed.height_of(1, 0), 5);
@@ -649,7 +652,7 @@ mod tests {
         let hops = Hops::of(&layered);
 
         for columns in order::orderings(&layered) {
-            assert!(place(&g, &columns, &hops).height() > 0);
+            assert!(place(&g, &columns, &hops, &[]).height() > 0);
         }
     }
 }
