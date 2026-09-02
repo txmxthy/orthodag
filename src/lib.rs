@@ -11,6 +11,7 @@
 // reach its own precondition should stop there and say so.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
+pub mod colour;
 pub mod graph;
 
 // Phases land before there is a `layout()` to call them from; the allow comes
@@ -23,6 +24,8 @@ mod paint;
 mod score;
 
 pub use score::Score;
+
+pub use colour::{Colour, PALETTE};
 
 pub use graph::{Edge, EdgeId, Graph, Node, NodeId};
 
