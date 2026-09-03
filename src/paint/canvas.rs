@@ -12,15 +12,38 @@ use std::fmt;
 
 use super::glyph::glyph;
 use super::grid::Grid;
+use crate::colour::Colour;
 
 /// The character an edge ends on.
 const HEAD: char = '▶';
+
+/// What a cell is coloured with.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Ink {
+    /// Nothing has been drawn here.
+    Blank,
+    /// One flow, or an untagged edge, which has no slot.
+    One(Option<Colour>),
+    /// Two flows of different colours. The cell holds one character and so one
+    /// ink; this is the layout's defect to avoid, not the painter's to resolve.
+    Mixed,
+}
+
+/// A run of cells that share a colour.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Span {
+    /// The characters.
+    pub text: String,
+    /// The palette slot, or `None` where the caller should use its default ink.
+    pub colour: Option<Colour>,
+}
 
 /// A drawing, one character per cell.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Canvas {
     grid: Grid,
     over: Vec<Option<char>>,
+    ink: Vec<Ink>,
 }
 
 impl Canvas {
@@ -29,6 +52,7 @@ impl Canvas {
         Self {
             grid: Grid::new(width, height),
             over: vec![None; width * height],
+            ink: vec![Ink::Blank; width * height],
         }
     }
 
@@ -36,13 +60,29 @@ impl Canvas {
     ///
     /// Order does not matter, here or between calls: runs accumulate bits and
     /// the character is decided at the end, from the bits alone.
-    pub(crate) fn path(&mut self, points: &[(i32, i32)]) {
+    pub(crate) fn path(&mut self, points: &[(i32, i32)], colour: Option<Colour>) {
         self.grid.path(points);
+        let mut touched = Vec::new();
+        super::grid::walk(points, |x, y, _| touched.push((x, y)));
+        for (x, y) in touched {
+            self.stain(x, y, colour);
+        }
+    }
+
+    /// Records what colour a cell is now carrying.
+    fn stain(&mut self, x: i32, y: i32, colour: Option<Colour>) {
+        let Some(at) = self.at(x, y) else { return };
+        self.ink[at] = match self.ink[at] {
+            Ink::Blank => Ink::One(colour),
+            Ink::One(held) if held == colour => Ink::One(held),
+            _ => Ink::Mixed,
+        };
     }
 
     /// Marks where an edge arrives.
-    pub(crate) fn head(&mut self, x: i32, y: i32) {
+    pub(crate) fn head(&mut self, x: i32, y: i32, colour: Option<Colour>) {
         self.put(x, y, HEAD);
+        self.stain(x, y, colour);
     }
 
     /// Puts one character over whatever is underneath.
@@ -96,6 +136,54 @@ impl Canvas {
             .and_then(|at| self.over[at])
             .unwrap_or_else(|| glyph(self.grid.bits(x, y)))
     }
+
+    /// What colour one cell is drawn in.
+    ///
+    /// A border or a label has none: they belong to a box, not a flow. So does
+    /// a cell two colours met in — the caller gets `None` and paints its
+    /// default, which is the honest thing to show for a cell that cannot say
+    /// which flow it belongs to.
+    fn colour_at(&self, x: i32, y: i32) -> Option<Colour> {
+        let at = self.at(x, y)?;
+        if self.over[at].is_some() && self.over[at] != Some(HEAD) {
+            return None;
+        }
+        match self.ink[at] {
+            Ink::One(colour) => colour,
+            Ink::Blank | Ink::Mixed => None,
+        }
+    }
+
+    /// The drawing as styled runs, one list per row.
+    ///
+    /// Adjacent cells of the same colour are one span, so a caller writes one
+    /// escape code — or one element, or one widget style — per run rather than
+    /// per cell. The library still never says what a colour looks like.
+    pub(crate) fn runs(&self) -> Vec<Vec<Span>> {
+        (0..self.grid.height())
+            .filter_map(|y| i32::try_from(y).ok())
+            .map(|y| {
+                let mut spans: Vec<Span> = Vec::new();
+                for x in (0..self.grid.width()).filter_map(|x| i32::try_from(x).ok()) {
+                    let (ch, colour) = (self.cell(x, y), self.colour_at(x, y));
+                    match spans.last_mut() {
+                        Some(span) if span.colour == colour => span.text.push(ch),
+                        _ => spans.push(Span {
+                            text: ch.to_string(),
+                            colour,
+                        }),
+                    }
+                }
+                if let Some(last) = spans.last_mut() {
+                    last.text.truncate(last.text.trim_end().len());
+                    if last.text.is_empty() {
+                        spans.pop();
+                    }
+                }
+                spans
+            })
+            .collect()
+    }
 }
 
 impl fmt::Display for Canvas {
@@ -129,33 +217,33 @@ mod tests {
     #[test]
     fn a_straight_run_draws_as_line() {
         let mut canvas = Canvas::new(6, 1);
-        canvas.path(&[(0, 0), (5, 0)]);
+        canvas.path(&[(0, 0), (5, 0)], None);
         assert_eq!(drawn(&canvas), ["──────"]);
     }
 
     #[test]
     fn a_turn_leaves_a_corner_nobody_asked_for() {
         let mut canvas = Canvas::new(4, 3);
-        canvas.path(&[(0, 0), (3, 0), (3, 2)]);
+        canvas.path(&[(0, 0), (3, 0), (3, 2)], None);
         assert_eq!(drawn(&canvas), ["───┐", "   │", "   │"]);
     }
 
     #[test]
     fn two_paths_crossing_leave_a_cross() {
         let mut canvas = Canvas::new(3, 3);
-        canvas.path(&[(0, 1), (2, 1)]);
-        canvas.path(&[(1, 0), (1, 2)]);
+        canvas.path(&[(0, 1), (2, 1)], None);
+        canvas.path(&[(1, 0), (1, 2)], None);
         assert_eq!(drawn(&canvas), [" │", "─┼─", " │"]);
     }
 
     #[test]
     fn a_fork_and_a_crossing_draw_the_same_because_they_read_the_same() {
         let (mut fork, mut crossing) = (Canvas::new(3, 3), Canvas::new(3, 3));
-        fork.path(&[(0, 1), (1, 1), (1, 0)]);
-        fork.path(&[(0, 1), (1, 1), (1, 2)]);
-        fork.path(&[(0, 1), (2, 1)]);
-        crossing.path(&[(0, 1), (2, 1)]);
-        crossing.path(&[(1, 0), (1, 2)]);
+        fork.path(&[(0, 1), (1, 1), (1, 0)], None);
+        fork.path(&[(0, 1), (1, 1), (1, 2)], None);
+        fork.path(&[(0, 1), (2, 1)], None);
+        crossing.path(&[(0, 1), (2, 1)], None);
+        crossing.path(&[(1, 0), (1, 2)], None);
         assert_eq!(drawn(&fork), drawn(&crossing));
     }
 
@@ -163,10 +251,10 @@ mod tests {
     fn the_order_paths_are_drawn_in_does_not_matter() {
         let (mut one, mut other) = (Canvas::new(9, 5), Canvas::new(9, 5));
         let (a, b) = ([(0, 0), (4, 0), (4, 4)], [(0, 2), (8, 2)]);
-        one.path(&a);
-        one.path(&b);
-        other.path(&b);
-        other.path(&a);
+        one.path(&a, None);
+        one.path(&b, None);
+        other.path(&b, None);
+        other.path(&a, None);
         assert_eq!(drawn(&one), drawn(&other));
     }
 
@@ -174,14 +262,14 @@ mod tests {
     fn a_border_does_not_fuse_with_a_line_that_touches_it() {
         let mut canvas = Canvas::new(8, 3);
         canvas.rect(0, 0, 5, 3);
-        canvas.path(&[(5, 1), (7, 1)]);
+        canvas.path(&[(5, 1), (7, 1)], None);
         assert_eq!(drawn(&canvas), ["┌───┐", "│   │───", "└───┘"]);
     }
 
     #[test]
     fn text_sits_over_whatever_is_under_it() {
         let mut canvas = Canvas::new(9, 1);
-        canvas.path(&[(0, 0), (8, 0)]);
+        canvas.path(&[(0, 0), (8, 0)], None);
         canvas.write(2, 0, "tag");
         assert_eq!(drawn(&canvas), ["──tag────"]);
     }
@@ -189,31 +277,89 @@ mod tests {
     #[test]
     fn an_arrowhead_marks_where_an_edge_arrives() {
         let mut canvas = Canvas::new(5, 1);
-        canvas.path(&[(0, 0), (4, 0)]);
-        canvas.head(4, 0);
+        canvas.path(&[(0, 0), (4, 0)], None);
+        canvas.head(4, 0, None);
         assert_eq!(drawn(&canvas), ["────▶"]);
     }
 
     #[test]
     fn trailing_blanks_are_cut() {
         let mut canvas = Canvas::new(10, 2);
-        canvas.path(&[(0, 0), (2, 0)]);
+        canvas.path(&[(0, 0), (2, 0)], None);
         assert_eq!(drawn(&canvas), ["───", ""]);
     }
 
     #[test]
     fn drawing_outside_the_canvas_is_dropped() {
         let mut canvas = Canvas::new(3, 1);
-        canvas.path(&[(-9, 0), (9, 0)]);
+        canvas.path(&[(-9, 0), (9, 0)], None);
         canvas.write(-2, 0, "off");
         canvas.rect(20, 20, 4, 4);
         assert_eq!(drawn(&canvas), ["f──"]);
     }
 
     #[test]
+    fn runs_join_up_the_cells_that_share_a_colour() {
+        let mut canvas = Canvas::new(9, 1);
+        canvas.path(&[(0, 0), (8, 0)], None);
+        let rows = canvas.runs();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].len(), 1, "one colour, one span");
+        assert_eq!(rows[0][0].text, "─────────");
+    }
+
+    #[test]
+    fn a_run_breaks_where_the_colour_does() {
+        let (one, other) = (Colour::from_slot(0), Colour::from_slot(1));
+        let mut canvas = Canvas::new(9, 3);
+        canvas.path(&[(0, 0), (3, 0)], Some(one));
+        canvas.path(&[(5, 0), (8, 0)], Some(other));
+        let colours: Vec<_> = canvas.runs()[0].iter().map(|s| s.colour).collect();
+        assert_eq!(colours, [Some(one), None, Some(other)]);
+    }
+
+    #[test]
+    fn a_cell_two_colours_met_in_belongs_to_neither() {
+        let (one, other) = (Colour::from_slot(0), Colour::from_slot(1));
+        let mut canvas = Canvas::new(3, 3);
+        canvas.path(&[(0, 1), (2, 1)], Some(one));
+        canvas.path(&[(1, 0), (1, 2)], Some(other));
+        let middle = &canvas.runs()[1];
+        assert_eq!(
+            middle.iter().map(|s| s.colour).collect::<Vec<_>>(),
+            [Some(one), None, Some(one)]
+        );
+    }
+
+    #[test]
+    fn a_border_carries_no_flow_colour() {
+        let mut canvas = Canvas::new(6, 3);
+        canvas.rect(0, 0, 5, 3);
+        canvas.write(1, 1, "ab");
+        assert!(canvas.runs()[0].iter().all(|s| s.colour.is_none()));
+    }
+
+    #[test]
+    fn runs_say_the_same_thing_the_string_does() {
+        let (one, other) = (Colour::from_slot(2), Colour::from_slot(5));
+        let mut canvas = Canvas::new(12, 4);
+        canvas.path(&[(0, 0), (6, 0), (6, 3)], Some(one));
+        canvas.path(&[(0, 2), (11, 2)], Some(other));
+        canvas.rect(7, 0, 4, 2);
+        canvas.head(11, 2, Some(other));
+
+        let joined: Vec<String> = canvas
+            .runs()
+            .iter()
+            .map(|row| row.iter().map(|s| s.text.as_str()).collect())
+            .collect();
+        assert_eq!(joined, canvas.to_string().lines().collect::<Vec<_>>());
+    }
+
+    #[test]
     fn a_diagonal_is_not_drawn_at_all() {
         let mut canvas = Canvas::new(4, 4);
-        canvas.path(&[(0, 0), (3, 3)]);
+        canvas.path(&[(0, 0), (3, 3)], None);
         assert_eq!(canvas.to_string().trim(), "");
     }
 }

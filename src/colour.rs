@@ -29,6 +29,12 @@ impl Colour {
     pub fn slot(self) -> u8 {
         self.0
     }
+
+    /// A slot by number, wrapped into the palette. For tests.
+    #[cfg(test)]
+    pub(crate) fn from_slot(slot: u8) -> Self {
+        Self(slot % PALETTE)
+    }
 }
 
 /// The palette slot of every edge, or `None` where it carries no tags.
