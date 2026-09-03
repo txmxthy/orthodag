@@ -8,7 +8,9 @@ mod glyph;
 pub(crate) mod grid;
 
 pub(crate) use canvas::Canvas;
+pub use canvas::Span;
 
+use crate::colour;
 use crate::graph::Graph;
 use crate::layout::route::Layout;
 
@@ -22,10 +24,12 @@ pub(crate) fn draw(g: &Graph, layout: &Layout) -> Canvas {
     let height = usize::try_from(layout.height).unwrap_or(0);
     let mut canvas = Canvas::new(width, height);
 
+    let colours = colour::of(g);
     for route in &layout.routes {
-        canvas.path(&route.points);
+        let ink = colours.get(route.edge.index()).copied().flatten();
+        canvas.path(&route.points, ink);
         if let Some((x, y)) = route.points.last() {
-            canvas.head(*x, *y);
+            canvas.head(*x, *y, ink);
         }
     }
 

@@ -9,6 +9,7 @@ mod acyclic;
 mod layer;
 mod order;
 mod place;
+mod port;
 mod rank;
 pub(crate) mod route;
 mod track;
@@ -58,8 +59,10 @@ pub(crate) fn build(g: &Graph) -> route::Layout {
         .into_iter()
         .next()
         .unwrap_or_default();
-    let placed = place::place(g, &columns, &hops);
-    route::route(g, &acyclic, &columns, &placed)
+    let interiors = port::interiors(g, &acyclic);
+    let placed = place::place(g, &columns, &hops, &interiors);
+    let ports = port::rows(g, &acyclic, &columns, &placed);
+    route::route(g, &acyclic, &columns, &placed, &ports)
 }
 
 #[cfg(test)]
@@ -153,8 +156,19 @@ mod tests {
                     *route.points.last().expect("a route has points"),
                 );
 
-                assert_eq!(first, (source.x + source.w, source.y + (source.h - 1) / 2));
-                assert_eq!(last, (target.x - 1, target.y + (target.h - 1) / 2));
+                // A box has an attach row per tag set now, so the row is not
+                // fixed; what is fixed is that it is inside the box, and that
+                // the line starts and stops one cell clear of the border.
+                assert_eq!(first.0, source.x + source.w);
+                assert_eq!(last.0, target.x - 1);
+                assert!(
+                    first.1 > source.y && first.1 < source.y + source.h - 1,
+                    "leaves at {} for a box at {}..{}",
+                    first.1,
+                    source.y,
+                    source.y + source.h
+                );
+                assert!(last.1 > target.y && last.1 < target.y + target.h - 1);
             }
 
             let routed: Vec<_> = drawing.routes.iter().map(|r| r.edge).collect();

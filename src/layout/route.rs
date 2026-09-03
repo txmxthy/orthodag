@@ -19,6 +19,7 @@ use super::acyclic::Acyclic;
 use super::layer::Slot;
 use super::order::Columns;
 use super::place::Placed;
+use super::port::Ports;
 use super::track::{Run, Tracks, pack};
 use crate::graph::{EdgeId, Graph, NodeId};
 
@@ -104,9 +105,15 @@ impl Path {
 }
 
 /// Lays out the boxes and routes every edge that has a path across the columns.
-pub(crate) fn route(g: &Graph, acyclic: &Acyclic, columns: &Columns, placed: &Placed) -> Layout {
+pub(crate) fn route(
+    g: &Graph,
+    acyclic: &Acyclic,
+    columns: &Columns,
+    placed: &Placed,
+    ports: &Ports,
+) -> Layout {
     let widths = widths(g, columns);
-    let paths = paths(g, acyclic, columns, placed);
+    let paths = paths(g, acyclic, columns, placed, ports);
     let runs = runs(&paths);
     let tracks = pack(&runs, columns.len().saturating_sub(1));
 
@@ -169,7 +176,13 @@ fn widths(g: &Graph, columns: &Columns) -> Vec<i32> {
 }
 
 /// The row every forward edge is on at each of its columns.
-fn paths(g: &Graph, acyclic: &Acyclic, columns: &Columns, placed: &Placed) -> Vec<Path> {
+fn paths(
+    g: &Graph,
+    acyclic: &Acyclic,
+    columns: &Columns,
+    placed: &Placed,
+    ports: &Ports,
+) -> Vec<Path> {
     g.edge_ids()
         .filter(|id| !acyclic.is_back(*id))
         .filter_map(|id| {
@@ -190,7 +203,13 @@ fn paths(g: &Graph, acyclic: &Acyclic, columns: &Columns, placed: &Placed) -> Ve
                         Slot::Pass(id)
                     };
                     let at = columns.get(column)?.iter().position(|s| *s == slot)?;
-                    Some(placed.middle(column, at))
+                    // A box's ends are its attach rows, one per tag set; a
+                    // placeholder has only the row it was given.
+                    Some(match (column == first, column == last) {
+                        (true, _) => ports.exit(id).unwrap_or(placed.middle(column, at)),
+                        (_, true) => ports.entry(id).unwrap_or(placed.middle(column, at)),
+                        _ => placed.middle(column, at),
+                    })
                 })
                 .collect::<Option<Vec<_>>>()?;
             Some(Path {

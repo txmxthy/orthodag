@@ -11,6 +11,7 @@
 // reach its own precondition should stop there and say so.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
+pub mod colour;
 pub mod graph;
 
 // Phases land before there is a `layout()` to call them from; the allow comes
@@ -22,7 +23,10 @@ mod paint;
 #[allow(dead_code)]
 mod score;
 
+pub use paint::Span;
 pub use score::Score;
+
+pub use colour::{Colour, PALETTE};
 
 pub use graph::{Edge, EdgeId, Graph, Node, NodeId};
 
@@ -47,6 +51,37 @@ pub use graph::{Edge, EdgeId, Graph, Node, NodeId};
 /// returns a string is honest about that.
 pub fn draw(graph: &Graph) -> String {
     paint::draw(graph, &layout::build(graph)).to_string()
+}
+
+/// Draws a graph as styled runs, one list per row.
+///
+/// The same drawing [`draw`] returns, cut into runs of one colour so a caller
+/// can paint a flow without this library ever knowing what a colour is. A span
+/// with no colour is a box, a label, or a cell where two flows met: paint those
+/// in whatever the default ink is.
+///
+/// # Example
+///
+/// ```
+/// use orthodag::{Graph, Node};
+///
+/// let mut g = Graph::new();
+/// let a = g.add_node(Node::new("a"));
+/// let b = g.add_node(Node::new("b"));
+/// g.add_tagged_edge(a, b, ["even"]);
+///
+/// for row in orthodag::spans(&g) {
+///     for span in row {
+///         match span.colour {
+///             Some(slot) => print!("\x1b[3{}m{}\x1b[0m", slot.slot() + 1, span.text),
+///             None => print!("{}", span.text),
+///         }
+///     }
+///     println!();
+/// }
+/// ```
+pub fn spans(graph: &Graph) -> Vec<Vec<Span>> {
+    paint::draw(graph, &layout::build(graph)).runs()
 }
 
 /// What the drawing of a graph is worth.
