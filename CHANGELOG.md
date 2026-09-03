@@ -29,3 +29,6 @@ nothing is released yet.
 - Track packing: every vertical run takes a channel of its own in the gap,
   except where two runs meet at an end and are one trunk. Tracks are ordered
   left to right by an exact search while there are few of them.
+- Ports: one attach row per tag set, and boxes tall enough to hold them.
+- Colour: `Colour`, `PALETTE`, `colour::of`, and `spans(&Graph) -> Vec<Vec<Span>>`
+  for the drawing as runs of one colour.

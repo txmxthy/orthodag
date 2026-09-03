@@ -60,16 +60,42 @@ colour a flow keeps across the drawing.
 | ordering, coordinates, routing | next |
 | the painter | done — direction bits, one glyph per combination |
 | tracks | done — a fan is one trunk with a branch each |
-| ports, colour | next |
+| ports and colour | done — one attach row per tag set, one slot per flow |
+| merging, lanes, fitting, import | next |
 | the scorer and the quality gate | done — two of nine fixtures still fail it |
 
-`draw` and `score` are the entry points so far, and `draw` returns a
-`String`. The design calls for layout, drawing and scoring as three
-separate calls, so a caller can colour one edge or ask what a drawing is
-worth, though none of that exists yet.
+`draw`, `spans` and `score` are the entry points so far. The design calls
+for layout, drawing and scoring as three separate calls, so a caller can
+colour one edge or ask what a drawing is worth, though none of that exists
+yet.
 
 Run `cargo run --example draw` to see the drawings above and a couple more,
 and `cargo run --example score` to see what each of them is worth.
+
+## Colour
+
+An edge carries a tag set. Two edges with the same tags are one flow, and a
+flow keeps its slot across the whole drawing; a box grows an interior row
+per tag set so no two flows have to share an attach row and lose one of
+their colours.
+
+`spans` hands back the drawing as runs of one colour, and the caller
+decides what a slot looks like:
+
+```rust
+for row in orthodag::spans(&g) {
+    for span in row {
+        match span.colour {
+            Some(slot) => print!("\x1b[3{}m{}\x1b[0m", slot.slot() + 1, span.text),
+            None => print!("{}", span.text),
+        }
+    }
+    println!();
+}
+```
+
+There are six slots, and then they wrap. Nothing here knows what a colour
+is, which is why the crate has no dependency on a terminal library.
 
 ## Scoring
 
