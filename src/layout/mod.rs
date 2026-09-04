@@ -140,14 +140,33 @@ mod tests {
     }
 
     #[test]
-    fn a_route_starts_and_ends_on_its_boxes() {
+    fn every_edge_reaches_the_page() {
+        // The scorer scores what is drawn, so an edge that never got drawn
+        // costs nothing and no metric can see it. This is the only thing that
+        // can: one route per edge, forward or back, or the drawing is lying
+        // about the graph.
+        for seed in 1..12u64 {
+            let g = seeded(seed, 24, 50);
+            let drawing = build(&g);
+            let mut routed: Vec<_> = drawing.routes.iter().map(|r| r.edge).collect();
+            routed.sort_unstable();
+            assert_eq!(
+                routed,
+                g.edge_ids().collect::<Vec<_>>(),
+                "seed {seed}: some edge is missing from the drawing"
+            );
+        }
+    }
+
+    #[test]
+    fn a_forward_route_starts_and_ends_on_its_boxes() {
         for seed in 1..12u64 {
             let g = seeded(seed, 24, 50);
             let adj = Adjacency::of(&g);
             let acyclic = back_edges(&g, &adj);
             let drawing = build(&g);
 
-            for route in &drawing.routes {
+            for route in drawing.routes.iter().filter(|r| !acyclic.is_back(r.edge)) {
                 let edge = g.edge(route.edge).expect("a route names a real edge");
                 let source = drawing.boxed(edge.from()).expect("the source is drawn");
                 let target = drawing.boxed(edge.to()).expect("the target is drawn");
@@ -161,23 +180,51 @@ mod tests {
                 // the line starts and stops one cell clear of the border.
                 assert_eq!(first.0, source.x + source.w);
                 assert_eq!(last.0, target.x - 1);
-                assert!(
-                    first.1 > source.y && first.1 < source.y + source.h - 1,
-                    "leaves at {} for a box at {}..{}",
-                    first.1,
-                    source.y,
-                    source.y + source.h
-                );
+                assert!(first.1 > source.y && first.1 < source.y + source.h - 1);
                 assert!(last.1 > target.y && last.1 < target.y + target.h - 1);
             }
-
-            let routed: Vec<_> = drawing.routes.iter().map(|r| r.edge).collect();
-            let forward: Vec<_> = g.edge_ids().filter(|e| !acyclic.is_back(*e)).collect();
-            assert_eq!(
-                routed, forward,
-                "seed {seed}: one route per forward edge, and no more"
-            );
         }
+    }
+
+    #[test]
+    fn a_back_edge_leaves_downward_and_arrives_from_below() {
+        let mut g = Graph::new();
+        let ids: Vec<_> = (0..3)
+            .map(|i| g.add_node(Node::new(format!("n{i}"))))
+            .collect();
+        for &(a, b) in &[(0, 1), (1, 2), (2, 1)] {
+            g.add_edge(ids[a], ids[b]);
+        }
+        let drawing = build(&g);
+        assert_eq!(drawing.routes.len(), 3, "the loop is drawn too");
+
+        let loop_back = drawing
+            .routes
+            .iter()
+            .find(|r| g.edge(r.edge).map(Edge::to) == Some(ids[1]) && r.points.len() > 2)
+            .expect("the back edge is routed");
+        let source = drawing.boxed(ids[2]).expect("its source is drawn");
+        let target = drawing.boxed(ids[1]).expect("its target is drawn");
+        let (first, last) = (
+            loop_back.points[0],
+            loop_back.points[loop_back.points.len() - 1],
+        );
+
+        assert_eq!(
+            first,
+            (source.x + source.w / 2, source.y + source.h),
+            "leaves downward"
+        );
+        assert_eq!(
+            last,
+            (target.x + target.w / 2, target.y + target.h),
+            "arrives from below"
+        );
+        assert!(
+            loop_back.points.iter().any(|p| p.1 >= drawing.height - 2),
+            "runs in a lane"
+        );
+        assert!(loop_back.bends() <= 4);
     }
 
     #[test]
@@ -218,23 +265,6 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn a_back_edge_is_not_routed_left_to_right() {
-        let mut g = Graph::new();
-        let ids: Vec<_> = (0..3)
-            .map(|i| g.add_node(Node::new(format!("n{i}"))))
-            .collect();
-        for &(a, b) in &[(0, 1), (1, 2), (2, 1)] {
-            g.add_edge(ids[a], ids[b]);
-        }
-        let drawing = build(&g);
-        assert_eq!(drawing.routes.len(), 2);
-        assert!(drawing.routes.iter().all(|r| {
-            g.edge(r.edge).map(Edge::to) != Some(ids[1])
-                || g.edge(r.edge).map(Edge::from) != Some(ids[2])
-        }));
     }
 
     #[test]

@@ -57,7 +57,7 @@ fn a_diamond_with_a_skip_draws() {
 }
 
 #[test]
-fn a_cycle_draws_without_its_back_edge() {
+fn a_cycle_draws_its_back_edge_in_a_lane() {
     let mut g = Graph::new();
     let ids = nodes(&mut g, &["in", "work", "retry"]);
     g.add_edge(ids[0], ids[1]);

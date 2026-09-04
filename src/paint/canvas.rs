@@ -14,8 +14,29 @@ use super::glyph::glyph;
 use super::grid::Grid;
 use crate::colour::Colour;
 
-/// The character an edge ends on.
-const HEAD: char = '▶';
+/// Which way an edge is pointing where it arrives.
+///
+/// Forward edges all arrive from the left, so this was a constant until back
+/// edges came up through a lane and needed to point the other way.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Heading {
+    Right,
+    Up,
+}
+
+impl Heading {
+    fn glyph(self) -> char {
+        match self {
+            Self::Right => '▶',
+            Self::Up => '▲',
+        }
+    }
+
+    /// Whether a character is an arrowhead, whichever way it points.
+    fn is_head(ch: char) -> bool {
+        [Self::Right, Self::Up].iter().any(|h| h.glyph() == ch)
+    }
+}
 
 /// What a cell is coloured with.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -79,9 +100,9 @@ impl Canvas {
         };
     }
 
-    /// Marks where an edge arrives.
-    pub(crate) fn head(&mut self, x: i32, y: i32, colour: Option<Colour>) {
-        self.put(x, y, HEAD);
+    /// Marks where an edge arrives, pointing the way it was going.
+    pub(crate) fn head(&mut self, x: i32, y: i32, facing: Heading, colour: Option<Colour>) {
+        self.put(x, y, facing.glyph());
         self.stain(x, y, colour);
     }
 
@@ -145,7 +166,7 @@ impl Canvas {
     /// which flow it belongs to.
     fn colour_at(&self, x: i32, y: i32) -> Option<Colour> {
         let at = self.at(x, y)?;
-        if self.over[at].is_some() && self.over[at] != Some(HEAD) {
+        if self.over[at].is_some_and(|ch| !Heading::is_head(ch)) {
             return None;
         }
         match self.ink[at] {
@@ -278,7 +299,7 @@ mod tests {
     fn an_arrowhead_marks_where_an_edge_arrives() {
         let mut canvas = Canvas::new(5, 1);
         canvas.path(&[(0, 0), (4, 0)], None);
-        canvas.head(4, 0, None);
+        canvas.head(4, 0, Heading::Right, None);
         assert_eq!(drawn(&canvas), ["────▶"]);
     }
 
@@ -346,7 +367,7 @@ mod tests {
         canvas.path(&[(0, 0), (6, 0), (6, 3)], Some(one));
         canvas.path(&[(0, 2), (11, 2)], Some(other));
         canvas.rect(7, 0, 4, 2);
-        canvas.head(11, 2, Some(other));
+        canvas.head(11, 2, Heading::Right, Some(other));
 
         let joined: Vec<String> = canvas
             .runs()

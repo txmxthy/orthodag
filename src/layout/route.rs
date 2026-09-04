@@ -121,7 +121,7 @@ pub(crate) fn route(
     let lefts = lefts(&widths, &gaps);
     let boxes = boxes(columns, placed, &widths, &lefts);
 
-    let routes = paths
+    let mut routes: Vec<Route> = paths
         .iter()
         .filter_map(|path| {
             let points = polyline(path, &runs, &tracks, &lefts, &widths)?;
@@ -131,6 +131,9 @@ pub(crate) fn route(
             })
         })
         .collect();
+
+    let (back, lanes) = back_routes(g, acyclic, &boxes, placed.height());
+    routes.extend(back);
 
     let width = lefts
         .iter()
@@ -142,8 +145,76 @@ pub(crate) fn route(
         boxes,
         routes,
         width,
-        height: placed.height(),
+        height: placed.height() + lanes,
     }
+}
+
+/// A blank row between the boxes and the first lane.
+const LANE_MARGIN: i32 = 1;
+
+/// Routes every back edge through a lane under the boxes, and says how many
+/// rows that added.
+///
+/// A back edge was taken out of the layering rather than reversed, because a
+/// reversed arrow reads as pointing the wrong way. That leaves it needing a
+/// vocabulary of its own, and this is it: down out of the source, left along a
+/// lane below everything, and up into the target. Two bends, well inside the
+/// four a back edge is allowed.
+///
+/// One lane per source, so a box with two loops back sends them down the same
+/// line and forks; shortest hops take the lanes nearest the boxes, so a short
+/// loop does not have to travel under a long one.
+fn back_routes(g: &Graph, acyclic: &Acyclic, boxes: &[Boxed], height: i32) -> (Vec<Route>, i32) {
+    let mut sources: Vec<(NodeId, i32, Vec<EdgeId>)> = Vec::new();
+    for id in g.edge_ids().filter(|id| acyclic.is_back(*id)) {
+        let Some(edge) = g.edge(id) else { continue };
+        let Some(from) = boxes.iter().find(|b| b.node == edge.from()) else {
+            continue;
+        };
+        let Some(to) = boxes.iter().find(|b| b.node == edge.to()) else {
+            continue;
+        };
+        let hop = i32::try_from(from.column.abs_diff(to.column)).unwrap_or(0);
+
+        match sources.iter_mut().find(|(node, _, _)| *node == edge.from()) {
+            Some((_, shortest, edges)) => {
+                *shortest = (*shortest).min(hop);
+                edges.push(id);
+            }
+            None => sources.push((edge.from(), hop, vec![id])),
+        }
+    }
+    if sources.is_empty() {
+        return (Vec::new(), 0);
+    }
+    sources.sort_by_key(|(node, shortest, _)| (*shortest, *node));
+
+    let mut routes = Vec::new();
+    for (at, (_, _, edges)) in sources.iter().enumerate() {
+        let lane = height + LANE_MARGIN + i32::try_from(at).unwrap_or(0);
+        for id in edges {
+            let Some(edge) = g.edge(*id) else { continue };
+            let (Some(from), Some(to)) = (
+                boxes.iter().find(|b| b.node == edge.from()),
+                boxes.iter().find(|b| b.node == edge.to()),
+            ) else {
+                continue;
+            };
+            let (out, back) = (from.x + from.w / 2, to.x + to.w / 2);
+            routes.push(Route {
+                edge: *id,
+                points: collapse(vec![
+                    (out, from.y + from.h),
+                    (out, lane),
+                    (back, lane),
+                    (back, to.y + to.h),
+                ]),
+            });
+        }
+    }
+
+    let lanes = i32::try_from(sources.len()).unwrap_or(0) + LANE_MARGIN;
+    (routes, lanes)
 }
 
 /// How wide each column's boxes are: the widest text in the column, padded.
