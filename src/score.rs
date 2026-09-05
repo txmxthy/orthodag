@@ -814,6 +814,81 @@ mod tests {
         }
     }
 
+    fn fan_in(tags: Option<&str>) -> Score {
+        let mut g = Graph::new();
+        let a = g.add_node(Node::new("a"));
+        let b = g.add_node(Node::new("b"));
+        let sink = g.add_node(Node::new("sink"));
+        for source in [a, b] {
+            match tags {
+                Some(tag) => g.add_tagged_edge(source, sink, [tag]),
+                None => g.add_edge(source, sink),
+            };
+        }
+        score(&g, &crate::layout::build(&g))
+    }
+
+    /// Two edges into one box, carrying the tag sets given.
+    fn into_one(one: &str, other: &str) -> Score {
+        let mut g = Graph::new();
+        let a = g.add_node(Node::new("a"));
+        let b = g.add_node(Node::new("b"));
+        let sink = g.add_node(Node::new("sink"));
+        g.add_tagged_edge(a, sink, [one]);
+        g.add_tagged_edge(b, sink, [other]);
+        score(&g, &crate::layout::build(&g))
+    }
+
+    #[test]
+    fn edges_sharing_a_tag_set_and_a_target_are_drawn_as_one_line() {
+        // One attach row means one track means one trunk with a branch off it,
+        // rather than two lines side by side. It falls out of the track rule and
+        // the port rule together; this is here so it stays a rule rather than an
+        // accident. Two different tag sets get rows of their own and cannot
+        // merge, which is what makes the comparison mean anything.
+        let merged = into_one("x", "x");
+        let apart = into_one("x", "y");
+        assert!(
+            merged.ink < apart.ink,
+            "one flow should cost less ink than two: {} against {}",
+            merged.ink,
+            apart.ink
+        );
+    }
+
+    #[test]
+    fn a_merge_is_free_whether_or_not_the_edges_are_tagged() {
+        // Two edges into one box merge because they arrive on one row, and an
+        // untagged pair shares the empty set's row just as a tagged pair shares
+        // its own. Neither is charged for the other's line.
+        assert_eq!(fan_in(None).ink, fan_in(Some("x")).ink);
+        assert_eq!(fan_in(None).vocabulary(), [0, 0, 0, 0]);
+        assert_eq!(fan_in(Some("x")).vocabulary(), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn ink_is_the_only_metric_that_sees_a_merge_as_a_win() {
+        // Every other number is per edge, so two edges drawn as one line each
+        // pay for the whole path and a merge reads as a regression. Ink counts
+        // drawn cells. This is why it is reported and not in the objective, and
+        // why the runbook says to judge a merge by it.
+        let merged = fan_in(Some("x"));
+        let raster = {
+            let mut g = Graph::new();
+            let a = g.add_node(Node::new("a"));
+            let b = g.add_node(Node::new("b"));
+            let sink = g.add_node(Node::new("sink"));
+            g.add_tagged_edge(a, sink, ["x"]);
+            g.add_tagged_edge(b, sink, ["x"]);
+            Raster::of(&crate::layout::build(&g))
+        };
+        let charged: usize = raster.drawn().map(|(_, _, ink)| ink.len()).sum();
+        assert!(
+            charged > merged.ink,
+            "the per-edge view charges twice for a shared cell"
+        );
+    }
+
     #[test]
     fn an_empty_drawing_rasters_to_nothing() {
         let raster = Raster::of(&Layout::default());
