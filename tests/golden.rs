@@ -7,7 +7,7 @@
 
 #![allow(clippy::unwrap_used)]
 
-use orthodag::{Graph, Node, Options};
+use orthodag::{Crossing, Graph, Node, Options};
 
 fn nodes(g: &mut Graph, names: &[&str]) -> Vec<orthodag::NodeId> {
     names.iter().map(|n| g.add_node(Node::new(*n))).collect()
@@ -97,6 +97,33 @@ fn labels_are_off_unless_asked_for() {
     g.add_tagged_edge(ids[0], ids[1], ["a-tag"]);
     assert!(!orthodag::draw(&g).contains("a-tag"));
     assert!(orthodag::draw_with(&g, Options::new().labels(true)).contains("a-tag"));
+}
+
+#[test]
+fn a_crossing_can_read_as_a_bridge() {
+    let mut g = Graph::new();
+    // Two chains with rungs between them and a skip over the top: the skip
+    // forces a track that the straight edges have to cross.
+    let ids = nodes(&mut g, &["a0", "b0", "a1", "b1", "a2", "b2", "end"]);
+    for &(from, to) in &[
+        (0, 2),
+        (1, 3),
+        (2, 4),
+        (3, 5),
+        (0, 3),
+        (1, 2),
+        (2, 5),
+        (3, 4),
+        (4, 6),
+        (5, 6),
+        (0, 6),
+    ] {
+        g.add_edge(ids[from], ids[to]);
+    }
+    insta::assert_snapshot!(
+        "bridge",
+        orthodag::draw_with(&g, Options::new().crossings(Crossing::Bridge))
+    );
 }
 
 #[test]

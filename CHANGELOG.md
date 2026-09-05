@@ -34,5 +34,5 @@ nothing is released yet.
   for the drawing as runs of one colour.
 - Back edges draw, through a lane under the boxes, with an arrowhead that points
   the way it is going.
-- `Options`, and `draw_with` / `spans_with` / `score_with`. The first option is
-  `labels`, which draws each edge's tags on it.
+- `Options`, and `draw_with` / `spans_with` / `score_with`. `labels` draws each
+  edge's tags on it; `crossings` chooses between `Cross` and `Bridge`.

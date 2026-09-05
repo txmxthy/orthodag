@@ -14,6 +14,10 @@ use super::glyph::glyph;
 use super::grid::Grid;
 use crate::colour::Colour;
 
+/// The characters a bridge is drawn with, which belong to the flows under them
+/// rather than to a box.
+const BRIDGE: [char; 3] = ['│', '╴', '╶'];
+
 /// Which way an edge is pointing where it arrives.
 ///
 /// Forward edges all arrive from the left, so this was a constant until back
@@ -159,6 +163,34 @@ impl Canvas {
         Some(y * self.grid.width() + x)
     }
 
+    /// Redraws crossings so the vertical reads as passing over the horizontal.
+    ///
+    /// The cell itself becomes plain vertical, and the horizontal is cut one
+    /// cell either side — but only where that neighbour is plain line. A corner
+    /// or a junction beside a crossing is doing its own job and stays.
+    pub(crate) fn bridge(&mut self, cells: &[(i32, i32)]) {
+        for (x, y) in cells {
+            if self.at(*x, *y).is_none() {
+                continue;
+            }
+            self.over_line(*x, *y, '│');
+            self.over_line(x - 1, *y, '╴');
+            self.over_line(x + 1, *y, '╶');
+        }
+    }
+
+    /// Overrides a cell, but only if it is currently plain line.
+    fn over_line(&mut self, x: i32, y: i32, ch: char) {
+        let Some(at) = self.at(x, y) else { return };
+        if self.over[at].is_some() {
+            return;
+        }
+        let drawn = glyph(self.grid.bits(x, y));
+        if ch == '│' || drawn == '─' {
+            self.over[at] = Some(ch);
+        }
+    }
+
     /// What one cell reads as: the overlay if there is one, else the bits.
     fn cell(&self, x: i32, y: i32) -> char {
         self.at(x, y)
@@ -176,7 +208,9 @@ impl Canvas {
         let at = self.at(x, y)?;
         // A border or a label on a box has no flow; an arrowhead and a caption
         // on an edge do, and were stained when they were written.
-        if self.over[at].is_some_and(|ch| !Heading::is_head(ch)) && self.ink[at] == Ink::Blank {
+        if self.over[at].is_some_and(|ch| !Heading::is_head(ch) && !BRIDGE.contains(&ch))
+            && self.ink[at] == Ink::Blank
+        {
             return None;
         }
         match self.ink[at] {
@@ -385,6 +419,39 @@ mod tests {
             .map(|row| row.iter().map(|s| s.text.as_str()).collect())
             .collect();
         assert_eq!(joined, canvas.to_string().lines().collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn a_bridge_cuts_the_horizontal_so_the_vertical_passes_over() {
+        let mut canvas = Canvas::new(5, 3);
+        canvas.path(&[(0, 1), (4, 1)], None);
+        canvas.path(&[(2, 0), (2, 2)], None);
+        assert_eq!(drawn(&canvas)[1], "──┼──");
+        canvas.bridge(&[(2, 1)]);
+        assert_eq!(drawn(&canvas)[1], "─╴│╶─");
+    }
+
+    #[test]
+    fn a_bridge_leaves_a_corner_beside_it_alone() {
+        // The cell right of the crossing is where another line turns. Cutting
+        // it would erase a bend, so it stays.
+        let mut canvas = Canvas::new(6, 4);
+        canvas.path(&[(0, 1), (5, 1)], None);
+        canvas.path(&[(2, 0), (2, 3)], None);
+        canvas.path(&[(3, 1), (3, 3)], None);
+        canvas.bridge(&[(2, 1)]);
+        let row = &drawn(&canvas)[1];
+        assert!(row.starts_with("─╴│"), "{row}");
+        assert!(row.contains('┬'), "the neighbour keeps its junction: {row}");
+    }
+
+    #[test]
+    fn a_bridge_over_nothing_changes_nothing() {
+        let mut canvas = Canvas::new(4, 1);
+        canvas.path(&[(0, 0), (3, 0)], None);
+        let before = drawn(&canvas);
+        canvas.bridge(&[(9, 9)]);
+        assert_eq!(drawn(&canvas), before);
     }
 
     #[test]

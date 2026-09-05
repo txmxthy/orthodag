@@ -377,6 +377,26 @@ impl fmt::Display for Score {
     }
 }
 
+/// The cells where two unrelated edges genuinely pass each other.
+///
+/// The painter asks for these so a bridge can be drawn, and it asks *here*
+/// rather than working them out for itself: what counts as a crossing is the
+/// objective's business, and a painter that disagreed with the scorer about it
+/// would draw a bridge over something the numbers called an overlap.
+pub(crate) fn crossing_cells(g: &Graph, layout: &Layout) -> Vec<(i32, i32)> {
+    Raster::of(layout)
+        .drawn()
+        .filter(|(_, _, ink)| {
+            ink.iter().enumerate().any(|(at, one)| {
+                ink[at + 1..]
+                    .iter()
+                    .any(|other| shared(g, *one, *other) == Shared::Crossing)
+            })
+        })
+        .map(|(x, y, _)| (x, y))
+        .collect()
+}
+
 /// Scores a drawing.
 pub(crate) fn score(g: &Graph, layout: &Layout) -> Score {
     let raster = Raster::of(layout);

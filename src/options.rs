@@ -1,5 +1,22 @@
 //! What a caller can ask for.
 
+/// How a cell where two edges genuinely pass each other is drawn.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Crossing {
+    /// The union of both edges' bits, `───┼───`.
+    ///
+    /// The same glyph a fork leaves where a straight sibling passes through, so
+    /// a crossing and a junction look alike. That is the cost, and it is the
+    /// default because it is what the box-drawing block is for.
+    #[default]
+    Cross,
+    /// The vertical reads as passing over: `──╴│╶──`.
+    ///
+    /// The horizontal is cut one cell either side, and only where the neighbour
+    /// is plain line — a corner or a junction beside a crossing stays put.
+    Bridge,
+}
+
 /// How a drawing should be made.
 ///
 /// Everything here has a default that is the plainest reading of the graph, so
@@ -13,6 +30,8 @@ pub struct Options {
     /// costs a gap wide enough to hold the longest of them. Worth it when the
     /// output is going somewhere colour cannot follow.
     pub labels: bool,
+    /// How a cell where two edges pass each other is drawn.
+    pub crossings: Crossing,
 }
 
 impl Options {
@@ -25,6 +44,13 @@ impl Options {
     #[must_use]
     pub fn labels(mut self, on: bool) -> Self {
         self.labels = on;
+        self
+    }
+
+    /// Chooses how a crossing is drawn.
+    #[must_use]
+    pub fn crossings(mut self, style: Crossing) -> Self {
+        self.crossings = style;
         self
     }
 }

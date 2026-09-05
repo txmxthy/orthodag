@@ -30,7 +30,7 @@ pub use score::Score;
 pub use colour::{Colour, PALETTE};
 
 pub use graph::{Edge, EdgeId, Graph, Node, NodeId};
-pub use options::Options;
+pub use options::{Crossing, Options};
 
 /// Draws a graph as box-drawing text.
 ///
@@ -57,7 +57,7 @@ pub fn draw(graph: &Graph) -> String {
 
 /// Draws a graph, with options.
 pub fn draw_with(graph: &Graph, options: Options) -> String {
-    paint::draw(graph, &layout::build(graph, options)).to_string()
+    paint::draw(graph, &layout::build(graph, options), options).to_string()
 }
 
 /// Draws a graph as styled runs, one list per row.
@@ -93,7 +93,7 @@ pub fn spans(graph: &Graph) -> Vec<Vec<Span>> {
 
 /// Draws a graph as styled runs, with options.
 pub fn spans_with(graph: &Graph, options: Options) -> Vec<Vec<Span>> {
-    paint::draw(graph, &layout::build(graph, options)).runs()
+    paint::draw(graph, &layout::build(graph, options), options).runs()
 }
 
 /// What the drawing of a graph is worth.

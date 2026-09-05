@@ -13,13 +13,15 @@ pub(crate) use canvas::{Canvas, Heading};
 use crate::colour;
 use crate::graph::Graph;
 use crate::layout::route::Layout;
+use crate::options::{Crossing, Options};
+use crate::score;
 
 /// Draws a laid-out graph.
 ///
 /// Routes first, boxes over them: a box is opaque, and an edge that ends up
 /// running under one should be hidden by it rather than drawn through it, so
 /// the defect shows as a line that stops rather than a box full of holes.
-pub(crate) fn draw(g: &Graph, layout: &Layout) -> Canvas {
+pub(crate) fn draw(g: &Graph, layout: &Layout, options: Options) -> Canvas {
     let width = usize::try_from(layout.width).unwrap_or(0);
     let height = usize::try_from(layout.height).unwrap_or(0);
     let mut canvas = Canvas::new(width, height);
@@ -37,6 +39,10 @@ pub(crate) fn draw(g: &Graph, layout: &Layout) -> Canvas {
             };
             canvas.head(*x, *y, facing, ink);
         }
+    }
+
+    if options.crossings == Crossing::Bridge {
+        canvas.bridge(&score::crossing_cells(g, layout));
     }
 
     for label in &layout.labels {
