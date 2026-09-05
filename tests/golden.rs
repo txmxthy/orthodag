@@ -7,7 +7,7 @@
 
 #![allow(clippy::unwrap_used)]
 
-use orthodag::{Graph, Node};
+use orthodag::{Graph, Node, Options};
 
 fn nodes(g: &mut Graph, names: &[&str]) -> Vec<orthodag::NodeId> {
     names.iter().map(|n| g.add_node(Node::new(*n))).collect()
@@ -71,6 +71,32 @@ fn a_lone_node_draws() {
     let mut g = Graph::new();
     g.add_node(Node::new("alone").line("no edges"));
     insta::assert_snapshot!("lone_node", orthodag::draw(&g));
+}
+
+#[test]
+fn tags_draw_on_their_edges_when_asked_for() {
+    let mut g = Graph::new();
+    let ids = nodes(
+        &mut g,
+        &["in", "route", "even-sink", "odd-sink", "number-sink"],
+    );
+    g.add_edge(ids[0], ids[1]);
+    g.add_tagged_edge(ids[1], ids[2], ["even-tag"]);
+    g.add_tagged_edge(ids[1], ids[3], ["odd-tag"]);
+    g.add_tagged_edge(ids[1], ids[4], ["even-tag", "odd-tag"]);
+    insta::assert_snapshot!(
+        "labels",
+        orthodag::draw_with(&g, Options::new().labels(true))
+    );
+}
+
+#[test]
+fn labels_are_off_unless_asked_for() {
+    let mut g = Graph::new();
+    let ids = nodes(&mut g, &["a", "b"]);
+    g.add_tagged_edge(ids[0], ids[1], ["a-tag"]);
+    assert!(!orthodag::draw(&g).contains("a-tag"));
+    assert!(orthodag::draw_with(&g, Options::new().labels(true)).contains("a-tag"));
 }
 
 #[test]

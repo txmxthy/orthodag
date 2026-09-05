@@ -39,6 +39,11 @@ pub(crate) fn draw(g: &Graph, layout: &Layout) -> Canvas {
         }
     }
 
+    for label in &layout.labels {
+        let ink = colours.get(label.edge.index()).copied().flatten();
+        canvas.write_over(label.x, label.y, &label.text, ink);
+    }
+
     for boxed in &layout.boxes {
         canvas.rect(boxed.x, boxed.y, boxed.w, boxed.h);
         let Some(node) = g.node(boxed.node) else {

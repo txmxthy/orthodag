@@ -15,6 +15,7 @@ pub(crate) mod route;
 mod track;
 
 use crate::graph::{EdgeId, Graph, NodeId};
+use crate::options::Options;
 
 /// Out-edges per node, built once and read by every phase.
 ///
@@ -49,7 +50,7 @@ impl Adjacency {
 /// The ordering phase proposes several candidates and this takes the first.
 /// Choosing between them means drawing each one and scoring the drawing, and
 /// there is nothing to draw with yet.
-pub(crate) fn build(g: &Graph) -> route::Layout {
+pub(crate) fn build(g: &Graph, options: Options) -> route::Layout {
     let adj = Adjacency::of(g);
     let acyclic = acyclic::back_edges(g, &adj);
     let ranked = rank::rank(g, &adj, &acyclic);
@@ -62,7 +63,7 @@ pub(crate) fn build(g: &Graph) -> route::Layout {
     let interiors = port::interiors(g, &acyclic);
     let placed = place::place(g, &columns, &hops, &interiors);
     let ports = port::rows(g, &acyclic, &columns, &placed);
-    route::route(g, &acyclic, &columns, &placed, &ports)
+    route::route(g, &acyclic, &columns, &placed, &ports, options)
 }
 
 #[cfg(test)]
@@ -70,6 +71,7 @@ mod tests {
     use super::Adjacency;
     use super::{acyclic::back_edges, build, layer::layer, order, rank::rank};
     use crate::graph::{Edge, Graph, Node};
+    use crate::options::Options;
 
     /// A pseudo-random graph that is the same graph every time.
     ///
@@ -147,7 +149,7 @@ mod tests {
         // about the graph.
         for seed in 1..12u64 {
             let g = seeded(seed, 24, 50);
-            let drawing = build(&g);
+            let drawing = build(&g, Options::default());
             let mut routed: Vec<_> = drawing.routes.iter().map(|r| r.edge).collect();
             routed.sort_unstable();
             assert_eq!(
@@ -164,7 +166,7 @@ mod tests {
             let g = seeded(seed, 24, 50);
             let adj = Adjacency::of(&g);
             let acyclic = back_edges(&g, &adj);
-            let drawing = build(&g);
+            let drawing = build(&g, Options::default());
 
             for route in drawing.routes.iter().filter(|r| !acyclic.is_back(r.edge)) {
                 let edge = g.edge(route.edge).expect("a route names a real edge");
@@ -195,7 +197,7 @@ mod tests {
         for &(a, b) in &[(0, 1), (1, 2), (2, 1)] {
             g.add_edge(ids[a], ids[b]);
         }
-        let drawing = build(&g);
+        let drawing = build(&g, Options::default());
         assert_eq!(drawing.routes.len(), 3, "the loop is drawn too");
 
         let loop_back = drawing
@@ -230,7 +232,7 @@ mod tests {
     #[test]
     fn a_route_turns_only_at_right_angles() {
         for seed in 1..12u64 {
-            for route in build(&seeded(seed, 24, 50)).routes {
+            for route in build(&seeded(seed, 24, 50), Options::default()).routes {
                 for pair in route.points.windows(2) {
                     let [a, b] = pair else { continue };
                     assert!(
@@ -250,7 +252,7 @@ mod tests {
             let acyclic = back_edges(&g, &adj);
             let ranked = rank(&g, &adj, &acyclic);
 
-            for route in build(&g).routes {
+            for route in build(&g, Options::default()).routes {
                 let Some(edge) = g.edge(route.edge) else {
                     continue;
                 };
@@ -270,9 +272,9 @@ mod tests {
     #[test]
     fn the_drawing_is_the_same_every_run() {
         let g = seeded(0xD12E, 40, 90);
-        let once = build(&g);
+        let once = build(&g, Options::default());
         for _ in 0..8 {
-            let again = build(&g);
+            let again = build(&g, Options::default());
             assert_eq!(again.boxes, once.boxes);
             assert_eq!(again.routes, once.routes);
             assert_eq!((again.width, again.height), (once.width, once.height));

@@ -113,6 +113,14 @@ impl Canvas {
         }
     }
 
+    /// Puts a run of text that belongs to a flow rather than to a box.
+    pub(crate) fn write_over(&mut self, x: i32, y: i32, text: &str, colour: Option<Colour>) {
+        self.write(x, y, text);
+        for step in 0..i32::try_from(text.chars().count()).unwrap_or(0) {
+            self.stain(x + step, y, colour);
+        }
+    }
+
     /// Puts a run of text, one character per cell, starting at `x`.
     pub(crate) fn write(&mut self, x: i32, y: i32, text: &str) {
         for (step, ch) in text.chars().enumerate() {
@@ -166,7 +174,9 @@ impl Canvas {
     /// which flow it belongs to.
     fn colour_at(&self, x: i32, y: i32) -> Option<Colour> {
         let at = self.at(x, y)?;
-        if self.over[at].is_some_and(|ch| !Heading::is_head(ch)) {
+        // A border or a label on a box has no flow; an arrowhead and a caption
+        // on an edge do, and were stained when they were written.
+        if self.over[at].is_some_and(|ch| !Heading::is_head(ch)) && self.ink[at] == Ink::Blank {
             return None;
         }
         match self.ink[at] {

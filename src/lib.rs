@@ -13,6 +13,7 @@
 
 pub mod colour;
 pub mod graph;
+pub mod options;
 
 // Phases land before there is a `layout()` to call them from; the allow comes
 // off with the function that ties them together.
@@ -29,6 +30,7 @@ pub use score::Score;
 pub use colour::{Colour, PALETTE};
 
 pub use graph::{Edge, EdgeId, Graph, Node, NodeId};
+pub use options::Options;
 
 /// Draws a graph as box-drawing text.
 ///
@@ -50,7 +52,12 @@ pub use graph::{Edge, EdgeId, Graph, Node, NodeId};
 /// what a drawing is worth; none of that exists yet, and one function that
 /// returns a string is honest about that.
 pub fn draw(graph: &Graph) -> String {
-    paint::draw(graph, &layout::build(graph)).to_string()
+    draw_with(graph, Options::default())
+}
+
+/// Draws a graph, with options.
+pub fn draw_with(graph: &Graph, options: Options) -> String {
+    paint::draw(graph, &layout::build(graph, options)).to_string()
 }
 
 /// Draws a graph as styled runs, one list per row.
@@ -81,7 +88,12 @@ pub fn draw(graph: &Graph) -> String {
 /// }
 /// ```
 pub fn spans(graph: &Graph) -> Vec<Vec<Span>> {
-    paint::draw(graph, &layout::build(graph)).runs()
+    spans_with(graph, Options::default())
+}
+
+/// Draws a graph as styled runs, with options.
+pub fn spans_with(graph: &Graph, options: Options) -> Vec<Vec<Span>> {
+    paint::draw(graph, &layout::build(graph, options)).runs()
 }
 
 /// What the drawing of a graph is worth.
@@ -91,5 +103,10 @@ pub fn spans(graph: &Graph) -> Vec<Vec<Span>> {
 /// and the rest is reported because it is useful to know, not because it is a
 /// goal.
 pub fn score(graph: &Graph) -> Score {
-    score::score(graph, &layout::build(graph))
+    score_with(graph, Options::default())
+}
+
+/// What the drawing of a graph is worth, with options.
+pub fn score_with(graph: &Graph, options: Options) -> Score {
+    score::score(graph, &layout::build(graph, options))
 }

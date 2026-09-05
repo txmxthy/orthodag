@@ -22,19 +22,30 @@ use super::place::Placed;
 use super::port::Ports;
 use super::track::{Run, Tracks, pack};
 use crate::graph::{EdgeId, Graph, NodeId};
+use crate::options::Options;
 
 /// The fewest blank columns between one column of boxes and the next.
 const MIN_GAP: i32 = 5;
 
-/// A cell of clearance either side of a gap's tracks: the stub out of the box
-/// on one side, and room for the arrowhead on the other.
-const CLEARANCE: usize = 2;
+/// Clearance either side of a gap's tracks: one cell of stub out of the box,
+/// and two on the other side so an arrowhead has a line to sit on the end of
+/// rather than appearing straight after a corner.
+const CLEARANCE: usize = 3;
 
 /// Padding inside a box: two borders and a space either side of the text.
 const PADDING: i32 = 4;
 
 /// The narrowest a box may be drawn.
 const MIN_WIDTH: i32 = PADDING + 1;
+
+/// A run of text drawn on an edge, in cells.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub(crate) struct Label {
+    pub(crate) edge: EdgeId,
+    pub(crate) x: i32,
+    pub(crate) y: i32,
+    pub(crate) text: String,
+}
 
 /// Where one box sits, in cells.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -67,6 +78,7 @@ impl Route {
 pub(crate) struct Layout {
     pub(crate) boxes: Vec<Boxed>,
     pub(crate) routes: Vec<Route>,
+    pub(crate) labels: Vec<Label>,
     pub(crate) width: i32,
     pub(crate) height: i32,
 }
@@ -111,20 +123,22 @@ pub(crate) fn route(
     columns: &Columns,
     placed: &Placed,
     ports: &Ports,
+    options: Options,
 ) -> Layout {
     let widths = widths(g, columns);
     let paths = paths(g, acyclic, columns, placed, ports);
     let runs = runs(&paths);
     let tracks = pack(&runs, columns.len().saturating_sub(1));
 
-    let gaps = gaps(&tracks, columns.len());
+    let captions = captions(g, &paths, options);
+    let gaps = gaps(&tracks, &captions, columns.len());
     let lefts = lefts(&widths, &gaps);
     let boxes = boxes(columns, placed, &widths, &lefts);
 
     let mut routes: Vec<Route> = paths
         .iter()
         .filter_map(|path| {
-            let points = polyline(path, &runs, &tracks, &lefts, &widths)?;
+            let points = polyline(path, &runs, &tracks, &captions, &lefts, &widths)?;
             Some(Route {
                 edge: path.edge,
                 points,
@@ -134,6 +148,7 @@ pub(crate) fn route(
 
     let (back, lanes) = back_routes(g, acyclic, &boxes, placed.height());
     routes.extend(back);
+    let labels = labels(&paths, &captions, &lefts, &widths);
 
     let width = lefts
         .iter()
@@ -144,9 +159,81 @@ pub(crate) fn route(
     Layout {
         boxes,
         routes,
+        labels,
         width,
         height: placed.height() + lanes,
     }
+}
+
+/// What each edge's caption says, and how much room each gap needs for one.
+///
+/// A caption belongs to the gap the edge leaves its source in, on the row it
+/// leaves on. Two edges on one row carry one tag set between them, so two
+/// captions can never collide.
+struct Captions {
+    text: Vec<Option<String>>,
+    per_gap: Vec<i32>,
+}
+
+impl Captions {
+    fn text(&self, at: usize) -> Option<&str> {
+        self.text.get(at)?.as_deref()
+    }
+
+    fn room(&self, gap: usize) -> i32 {
+        self.per_gap.get(gap).copied().unwrap_or(0)
+    }
+}
+
+fn captions(g: &Graph, paths: &[Path], options: Options) -> Captions {
+    if !options.labels {
+        return Captions {
+            text: vec![None; paths.len()],
+            per_gap: Vec::new(),
+        };
+    }
+
+    let text: Vec<Option<String>> = paths
+        .iter()
+        .map(|path| {
+            let tags = g.edge(path.edge)?.tags();
+            (!tags.is_empty()).then(|| tags.join(", "))
+        })
+        .collect();
+
+    let mut per_gap: Vec<i32> = Vec::new();
+    for (at, path) in paths.iter().enumerate() {
+        let Some(caption) = text.get(at).and_then(Option::as_deref) else {
+            continue;
+        };
+        let room = i32::try_from(caption.chars().count()).unwrap_or(0) + 1;
+        if per_gap.len() <= path.first {
+            per_gap.resize(path.first + 1, 0);
+        }
+        if let Some(slot) = per_gap.get_mut(path.first) {
+            *slot = (*slot).max(room);
+        }
+    }
+    Captions { text, per_gap }
+}
+
+/// Where each caption goes: the first cell of its gap's caption area, on the
+/// row its edge leaves the source on.
+fn labels(paths: &[Path], captions: &Captions, lefts: &[i32], widths: &[i32]) -> Vec<Label> {
+    paths
+        .iter()
+        .enumerate()
+        .filter_map(|(at, path)| {
+            let text = captions.text(at)?;
+            let start = lefts.get(path.first)? + widths.get(path.first)?;
+            Some(Label {
+                edge: path.edge,
+                x: start + 1,
+                y: *path.rows.first()?,
+                text: text.to_owned(),
+            })
+        })
+        .collect()
 }
 
 /// A blank row between the boxes and the first lane.
@@ -325,12 +412,12 @@ fn runs(paths: &[Path]) -> Vec<Run> {
     runs
 }
 
-/// How wide each gap has to be to hold its tracks.
-fn gaps(tracks: &Tracks, columns: usize) -> Vec<i32> {
+/// How wide each gap has to be to hold its captions and its tracks.
+fn gaps(tracks: &Tracks, captions: &Captions, columns: usize) -> Vec<i32> {
     (0..columns.saturating_sub(1))
         .map(|gap| {
             let needed = i32::try_from(tracks.count(gap) + CLEARANCE).unwrap_or(MIN_GAP);
-            needed.max(MIN_GAP)
+            (needed + captions.room(gap)).max(MIN_GAP)
         })
         .collect()
 }
@@ -372,6 +459,7 @@ fn polyline(
     path: &Path,
     runs: &[Run],
     tracks: &Tracks,
+    captions: &Captions,
     lefts: &[i32],
     widths: &[i32],
 ) -> Option<Vec<(i32, i32)>> {
@@ -392,7 +480,7 @@ fn polyline(
             .iter()
             .position(|run| run.edge == path.edge && run.gap == gap)
             .map_or(0, |run| tracks.of(run));
-        let x = track_x(lefts, widths, gap, track);
+        let x = track_x(lefts, widths, gap, track) + captions.room(gap);
         points.push((x, from_row));
         points.push((x, to_row));
     }
@@ -443,7 +531,24 @@ mod tests {
 
     #[test]
     fn a_gap_is_never_narrower_than_the_minimum() {
-        assert_eq!(gaps(&Tracks::default(), 3), [MIN_GAP, MIN_GAP]);
+        let none = Captions {
+            text: Vec::new(),
+            per_gap: Vec::new(),
+        };
+        assert_eq!(gaps(&Tracks::default(), &none, 3), [MIN_GAP, MIN_GAP]);
+    }
+
+    #[test]
+    fn a_caption_widens_the_gap_it_sits_in() {
+        let captions = Captions {
+            text: Vec::new(),
+            per_gap: vec![9, 0],
+        };
+        let widths = gaps(&Tracks::default(), &captions, 3);
+        // No tracks here, so the gap is the clearance plus the caption, which
+        // is already past the minimum.
+        assert_eq!(widths[0], i32::try_from(CLEARANCE).unwrap() + 9);
+        assert_eq!(widths[1], MIN_GAP);
     }
 
     #[test]

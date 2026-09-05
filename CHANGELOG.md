@@ -32,3 +32,7 @@ nothing is released yet.
 - Ports: one attach row per tag set, and boxes tall enough to hold them.
 - Colour: `Colour`, `PALETTE`, `colour::of`, and `spans(&Graph) -> Vec<Vec<Span>>`
   for the drawing as runs of one colour.
+- Back edges draw, through a lane under the boxes, with an arrowhead that points
+  the way it is going.
+- `Options`, and `draw_with` / `spans_with` / `score_with`. The first option is
+  `labels`, which draws each edge's tags on it.

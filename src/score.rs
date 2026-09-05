@@ -504,7 +504,7 @@ mod tests {
         for &(a, b) in edges {
             g.add_edge(ids[a], ids[b]);
         }
-        let layout = layout::build(&g);
+        let layout = layout::build(&g, crate::options::Options::default());
         (g, layout)
     }
 
@@ -742,7 +742,10 @@ mod tests {
         g.add_edge(spare, ids[0]);
         g.add_edge(source, ids[1]);
         g.add_edge(source, ids[2]);
-        let s = score(&g, &crate::layout::build(&g));
+        let s = score(
+            &g,
+            &crate::layout::build(&g, crate::options::Options::default()),
+        );
         assert!(s.asymmetry >= 0);
     }
 
@@ -825,7 +828,10 @@ mod tests {
                 None => g.add_edge(source, sink),
             };
         }
-        score(&g, &crate::layout::build(&g))
+        score(
+            &g,
+            &crate::layout::build(&g, crate::options::Options::default()),
+        )
     }
 
     /// Two edges into one box, carrying the tag sets given.
@@ -836,7 +842,10 @@ mod tests {
         let sink = g.add_node(Node::new("sink"));
         g.add_tagged_edge(a, sink, [one]);
         g.add_tagged_edge(b, sink, [other]);
-        score(&g, &crate::layout::build(&g))
+        score(
+            &g,
+            &crate::layout::build(&g, crate::options::Options::default()),
+        )
     }
 
     #[test]
@@ -880,7 +889,10 @@ mod tests {
             let sink = g.add_node(Node::new("sink"));
             g.add_tagged_edge(a, sink, ["x"]);
             g.add_tagged_edge(b, sink, ["x"]);
-            Raster::of(&crate::layout::build(&g))
+            Raster::of(&crate::layout::build(
+                &g,
+                crate::options::Options::default(),
+            ))
         };
         let charged: usize = raster.drawn().map(|(_, _, ink)| ink.len()).sum();
         assert!(

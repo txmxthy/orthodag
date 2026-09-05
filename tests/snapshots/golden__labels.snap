@@ -1,0 +1,15 @@
+---
+source: tests/golden.rs
+expression: "orthodag::draw_with(&g, Options::new().labels(true))"
+---
+                                          ┌─────────────┐
+                                       ┌─▶│ even-sink   │
+                                       │  └─────────────┘
+           ┌───────┐                   │
+┌────┐     │ route │─even-tag──────────┘  ┌─────────────┐
+│ in │────▶│       │─odd-tag─────────────▶│ odd-sink    │
+└────┘     │       │─even-tag, odd-tag─┐  └─────────────┘
+           └───────┘                   │
+                                       │  ┌─────────────┐
+                                       └─▶│ number-sink │
+                                          └─────────────┘
