@@ -61,7 +61,8 @@ colour a flow keeps across the drawing.
 | the painter | done — direction bits, one glyph per combination |
 | tracks | done — a fan is one trunk with a branch each |
 | ports and colour | done — one attach row per tag set, one slot per flow |
-| merging, lanes, fitting, import | next |
+| lanes, labels, bridges, fitting | done |
+| import, export, the gallery | next |
 | the scorer and the quality gate | done — two of nine fixtures still fail it |
 
 `draw`, `spans` and `score` are the entry points so far. The design calls
@@ -71,6 +72,21 @@ yet.
 
 Run `cargo run --example draw` to see the drawings above and a couple more,
 and `cargo run --example score` to see what each of them is worth.
+
+## Options
+
+```rust
+use orthodag::{Crossing, Options};
+
+orthodag::draw_with(&g, Options::new().labels(true));                 // tags on the edges
+orthodag::draw_with(&g, Options::new().crossings(Crossing::Bridge));  // ──╴│╶── not ───┼───
+orthodag::draw_with(&g, Options::new().width(80));                    // fit 80 columns
+```
+
+Asking for a width walks a fixed ladder — roomier gaps first, then shorter
+box text — and stops at the widest rung that fits. If even the last rung is
+too wide, that one comes back, because half a box is worse than a wide
+one, so nothing is ever clipped.
 
 ## Colour
 

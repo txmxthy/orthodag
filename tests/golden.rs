@@ -126,6 +126,79 @@ fn a_crossing_can_read_as_a_bridge() {
     );
 }
 
+/// The widest line of a drawing.
+fn columns(drawn: &str) -> usize {
+    drawn
+        .lines()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0)
+}
+
+#[test]
+fn a_drawing_shrinks_to_fit_a_width() {
+    let mut g = Graph::new();
+    let ids = nodes(
+        &mut g,
+        &[
+            "a-very-long-source-name",
+            "an-equally-long-middle",
+            "and-a-long-sink-name-too",
+        ],
+    );
+    g.add_edge(ids[0], ids[1]);
+    g.add_edge(ids[1], ids[2]);
+
+    let natural = orthodag::draw(&g);
+    assert!(columns(&natural) > 60);
+
+    let fitted = orthodag::draw_with(&g, Options::new().width(60));
+    assert!(
+        columns(&fitted) <= 60,
+        "asked for 60, got {}",
+        columns(&fitted)
+    );
+    assert!(fitted.contains('…'), "text was cut, so it should say so");
+    insta::assert_snapshot!("fitted", fitted);
+}
+
+#[test]
+fn a_width_nothing_can_reach_gives_the_narrowest_rather_than_a_clipped_drawing() {
+    let mut g = Graph::new();
+    let ids = nodes(
+        &mut g,
+        &["a-very-long-source-name", "and-a-long-sink-name-too"],
+    );
+    g.add_edge(ids[0], ids[1]);
+
+    let floor = orthodag::draw_with(&g, Options::new().width(4));
+    assert!(
+        columns(&floor) > 4,
+        "nothing can draw two boxes in four columns"
+    );
+    assert_eq!(
+        columns(&floor),
+        columns(&orthodag::draw_with(&g, Options::new().width(1))),
+        "past the floor, asking for less changes nothing"
+    );
+    assert!(
+        floor
+            .lines()
+            .all(|line| line.chars().count() <= columns(&floor))
+    );
+}
+
+#[test]
+fn asking_for_more_room_than_it_needs_changes_nothing() {
+    let mut g = Graph::new();
+    let ids = nodes(&mut g, &["in", "out"]);
+    g.add_edge(ids[0], ids[1]);
+    assert_eq!(
+        orthodag::draw(&g),
+        orthodag::draw_with(&g, Options::new().width(400))
+    );
+}
+
 #[test]
 fn an_empty_graph_draws_nothing() {
     assert_eq!(orthodag::draw(&Graph::new()), "");

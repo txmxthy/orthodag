@@ -35,4 +35,5 @@ nothing is released yet.
 - Back edges draw, through a lane under the boxes, with an arrowhead that points
   the way it is going.
 - `Options`, and `draw_with` / `spans_with` / `score_with`. `labels` draws each
-  edge's tags on it; `crossings` chooses between `Cross` and `Bridge`.
+  edge's tags on it; `crossings` chooses between `Cross` and `Bridge`; `width`
+  shrinks the drawing through a ladder of steps to fit a target.

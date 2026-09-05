@@ -51,6 +51,30 @@ impl Adjacency {
 /// Choosing between them means drawing each one and scoring the drawing, and
 /// there is nothing to draw with yet.
 pub(crate) fn build(g: &Graph, options: Options) -> route::Layout {
+    let Some(target) = options.width.and_then(|w| i32::try_from(w).ok()) else {
+        return build_at(g, route::Style::natural(options));
+    };
+
+    // Walk the ladder and stop at the first rung that fits. If none do, keep
+    // the narrowest: a drawing wider than asked for is still a drawing, and
+    // clipping one would be worse than admitting it did not fit.
+    let mut narrowest: Option<route::Layout> = None;
+    for rung in route::Style::ladder(options) {
+        let layout = build_at(g, rung);
+        if layout.width <= target {
+            return layout;
+        }
+        if narrowest
+            .as_ref()
+            .is_none_or(|held| layout.width < held.width)
+        {
+            narrowest = Some(layout);
+        }
+    }
+    narrowest.unwrap_or_default()
+}
+
+fn build_at(g: &Graph, style: route::Style) -> route::Layout {
     let adj = Adjacency::of(g);
     let acyclic = acyclic::back_edges(g, &adj);
     let ranked = rank::rank(g, &adj, &acyclic);
@@ -63,7 +87,7 @@ pub(crate) fn build(g: &Graph, options: Options) -> route::Layout {
     let interiors = port::interiors(g, &acyclic);
     let placed = place::place(g, &columns, &hops, &interiors);
     let ports = port::rows(g, &acyclic, &columns, &placed);
-    route::route(g, &acyclic, &columns, &placed, &ports, options)
+    route::route(g, &acyclic, &columns, &placed, &ports, style)
 }
 
 #[cfg(test)]

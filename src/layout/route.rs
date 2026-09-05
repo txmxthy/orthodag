@@ -24,7 +24,50 @@ use super::track::{Run, Tracks, pack};
 use crate::graph::{EdgeId, Graph, NodeId};
 use crate::options::Options;
 
-/// The fewest blank columns between one column of boxes and the next.
+/// How the drawing is sized and captioned.
+///
+/// A drawing has a natural size, and a caller asking for less gets a walk down
+/// a fixed ladder rather than a search: predictable, and every rung is a
+/// drawing somebody could have asked for on its own.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct Style {
+    /// The fewest blank columns between one column of boxes and the next.
+    pub(crate) gap: i32,
+    /// The most characters of a box's text to keep.
+    pub(crate) cap: usize,
+    /// Whether each edge carries its tags.
+    pub(crate) labels: bool,
+}
+
+impl Style {
+    /// The natural drawing: roomy gaps, nothing trimmed.
+    pub(crate) fn natural(options: Options) -> Self {
+        Self {
+            gap: MIN_GAP,
+            cap: usize::MAX,
+            labels: options.labels,
+        }
+    }
+
+    /// The rungs, widest first. The last is the legibility floor: below six
+    /// characters a box says nothing worth reading, so nothing goes below it.
+    pub(crate) fn ladder(options: Options) -> [Self; 5] {
+        let rung = |gap, cap| Self {
+            gap,
+            cap,
+            labels: options.labels,
+        };
+        [
+            Self::natural(options),
+            rung(4, 24),
+            rung(3, 16),
+            rung(3, 10),
+            rung(3, 6),
+        ]
+    }
+}
+
+/// The fewest blank columns between one column of boxes and the next, unsqueezed.
 const MIN_GAP: i32 = 5;
 
 /// Clearance either side of a gap's tracks: one cell of stub out of the box,
@@ -123,16 +166,16 @@ pub(crate) fn route(
     columns: &Columns,
     placed: &Placed,
     ports: &Ports,
-    options: Options,
+    style: Style,
 ) -> Layout {
-    let widths = widths(g, columns);
+    let widths = widths(g, columns, style);
     let paths = paths(g, acyclic, columns, placed, ports);
     let runs = runs(&paths);
     let tracks = pack(&runs, columns.len().saturating_sub(1));
 
-    let captions = captions(g, &paths, options);
-    let gaps = gaps(&tracks, &captions, columns.len());
-    let lefts = lefts(&widths, &gaps);
+    let captions = captions(g, &paths, style);
+    let gaps = gaps(&tracks, &captions, columns.len(), style);
+    let lefts = lefts(&widths, &gaps, style);
     let boxes = boxes(columns, placed, &widths, &lefts);
 
     let mut routes: Vec<Route> = paths
@@ -185,8 +228,8 @@ impl Captions {
     }
 }
 
-fn captions(g: &Graph, paths: &[Path], options: Options) -> Captions {
-    if !options.labels {
+fn captions(g: &Graph, paths: &[Path], style: Style) -> Captions {
+    if !style.labels {
         return Captions {
             text: vec![None; paths.len()],
             per_gap: Vec::new(),
@@ -308,7 +351,7 @@ fn back_routes(g: &Graph, acyclic: &Acyclic, boxes: &[Boxed], height: i32) -> (V
 ///
 /// One width per column rather than per box, because boxes whose left edges do
 /// not line up read as a ragged margin rather than as a column.
-fn widths(g: &Graph, columns: &Columns) -> Vec<i32> {
+fn widths(g: &Graph, columns: &Columns, style: Style) -> Vec<i32> {
     columns
         .iter()
         .map(|slots| {
@@ -321,7 +364,8 @@ fn widths(g: &Graph, columns: &Columns) -> Vec<i32> {
                 .map(|node| {
                     let longest = std::iter::once(node.label())
                         .chain(node.lines().iter().map(String::as_str))
-                        .map(|line| i32::try_from(line.chars().count()).unwrap_or(i32::MAX))
+                        .map(|line| line.chars().count().min(style.cap))
+                        .map(|len| i32::try_from(len).unwrap_or(i32::MAX))
                         .max()
                         .unwrap_or(0);
                     longest.saturating_add(PADDING)
@@ -413,24 +457,24 @@ fn runs(paths: &[Path]) -> Vec<Run> {
 }
 
 /// How wide each gap has to be to hold its captions and its tracks.
-fn gaps(tracks: &Tracks, captions: &Captions, columns: usize) -> Vec<i32> {
+fn gaps(tracks: &Tracks, captions: &Captions, columns: usize, style: Style) -> Vec<i32> {
     (0..columns.saturating_sub(1))
         .map(|gap| {
-            let needed = i32::try_from(tracks.count(gap) + CLEARANCE).unwrap_or(MIN_GAP);
-            (needed + captions.room(gap)).max(MIN_GAP)
+            let needed = i32::try_from(tracks.count(gap) + CLEARANCE).unwrap_or(style.gap);
+            (needed + captions.room(gap)).max(style.gap)
         })
         .collect()
 }
 
 /// The left edge of each column.
-fn lefts(widths: &[i32], gaps: &[i32]) -> Vec<i32> {
+fn lefts(widths: &[i32], gaps: &[i32], style: Style) -> Vec<i32> {
     let mut x = 0;
     widths
         .iter()
         .enumerate()
         .map(|(column, w)| {
             let at = x;
-            x += w + gaps.get(column).copied().unwrap_or(MIN_GAP);
+            x += w + gaps.get(column).copied().unwrap_or(style.gap);
             at
         })
         .collect()
@@ -535,7 +579,15 @@ mod tests {
             text: Vec::new(),
             per_gap: Vec::new(),
         };
-        assert_eq!(gaps(&Tracks::default(), &none, 3), [MIN_GAP, MIN_GAP]);
+        assert_eq!(
+            gaps(
+                &Tracks::default(),
+                &none,
+                3,
+                Style::natural(Options::default())
+            ),
+            [MIN_GAP, MIN_GAP]
+        );
     }
 
     #[test]
@@ -544,7 +596,12 @@ mod tests {
             text: Vec::new(),
             per_gap: vec![9, 0],
         };
-        let widths = gaps(&Tracks::default(), &captions, 3);
+        let widths = gaps(
+            &Tracks::default(),
+            &captions,
+            3,
+            Style::natural(Options::default()),
+        );
         // No tracks here, so the gap is the clearance plus the caption, which
         // is already past the minimum.
         assert_eq!(widths[0], i32::try_from(CLEARANCE).unwrap() + 9);
@@ -554,7 +611,7 @@ mod tests {
     #[test]
     fn a_track_sits_clear_of_the_box_it_leaves() {
         let (widths, gaps) = (vec![6, 6], vec![5]);
-        let lefts = lefts(&widths, &gaps);
+        let lefts = lefts(&widths, &gaps, Style::natural(Options::default()));
         assert_eq!(lefts, [0, 11]);
         // The box occupies 0..5, so 6 is the first free cell and the first
         // track is one clear of that.

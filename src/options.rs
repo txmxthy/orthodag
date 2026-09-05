@@ -32,6 +32,13 @@ pub struct Options {
     pub labels: bool,
     /// How a cell where two edges pass each other is drawn.
     pub crossings: Crossing,
+    /// Columns to fit the drawing into, if the caller has a limit.
+    ///
+    /// A drawing has a natural width. Asking for less makes it shrink through a
+    /// fixed ladder of steps down to a legibility floor; if even the floor is
+    /// too wide, the narrowest attempt is what comes back. Nothing is ever
+    /// clipped, because half a box is worse than a wide one.
+    pub width: Option<usize>,
 }
 
 impl Options {
@@ -51,6 +58,13 @@ impl Options {
     #[must_use]
     pub fn crossings(mut self, style: Crossing) -> Self {
         self.crossings = style;
+        self
+    }
+
+    /// Asks for a drawing no wider than this, if one can be had.
+    #[must_use]
+    pub fn width(mut self, columns: usize) -> Self {
+        self.width = Some(columns);
         self
     }
 }
