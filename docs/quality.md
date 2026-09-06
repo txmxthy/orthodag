@@ -112,10 +112,30 @@ Do not edit the scorer, the fixtures, the clean list, or the baseline
 merely to make a change pass. If the objective itself is wrong, make that
 its own change with its own argument.
 
+## Visual review
+
+```sh
+just gallery            # committed fixtures
+just gallery --wide     # also generated graphs and any private corpus
+```
+
+The output is one static page, `target/gallery/index.html`. Each graph has
+four frames: plain, with labels, with bridges, and fitted to eighty
+columns. Sort by name or by score, and record what is wrong beside the
+affected frames.
+
+Notes are stored in the browser and are available only there. This keeps
+the tool serverless, at the cost of notes that stay on one machine. That
+is the right trade for a tool one person runs alone.
+
+The gallery can include private corpus data, so keep the generated page
+local.
+
 ## Review procedure
 
-1. Start with the fixture that has the largest total, and its most
-   expensive defect.
+1. Start with the graph that has the largest total, and its most
+   expensive defect. Look at it in the gallery before changing anything:
+   the score says where, the frame shows what.
 2. Change one thing.
 3. Run `cargo test`. A moved character fails a snapshot and leaves
    `x.snap.new` beside `x.snap`. Read both, and accept with `mv` only when

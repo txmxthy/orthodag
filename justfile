@@ -21,6 +21,10 @@ corpus:
 score *flags="":
     cargo run -q --example score -- {{flags}}
 
+# every graph on one page, to be looked at (does not open a browser)
+gallery *flags="":
+    cargo run -q --features mermaid --example gallery -- {{flags}}
+
 # store today's numbers as the baseline the ratchet compares against
 baseline:
     @mkdir -p target/quality

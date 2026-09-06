@@ -37,3 +37,5 @@ nothing is released yet.
 - `Options`, and `draw_with` / `spans_with` / `score_with`. `labels` draws each
   edge's tags on it; `crossings` chooses between `Cross` and `Bridge`; `width`
   shrinks the drawing through a ladder of steps to fit a target.
+- Mermaid in and out behind the `mermaid` feature, DOT out behind `dot`.
+- A seeded generator, a loader for a private corpus, and a gallery page.
