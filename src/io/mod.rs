@@ -7,5 +7,9 @@
 //!
 //! [`Graph`]: crate::Graph
 
+#[cfg(feature = "dot")]
+pub mod dot;
 #[cfg(feature = "mermaid")]
 pub mod mermaid_in;
+#[cfg(feature = "mermaid")]
+pub mod mermaid_out;

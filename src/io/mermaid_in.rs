@@ -128,7 +128,15 @@ impl Sheet {
             }
             return held;
         }
-        let node = self.graph.add_node(Node::new(label.unwrap_or(id)));
+        // A label written with breaks in it comes back as a headline and the
+        // lines under it, which is how it went out.
+        let text = label.unwrap_or(id);
+        let mut parts = text.split("<br>").map(str::trim);
+        let mut node = Node::new(parts.next().unwrap_or(text));
+        for line in parts {
+            node = node.line(line);
+        }
+        let node = self.graph.add_node(node);
         self.named.push((id.to_owned(), node));
         node
     }
