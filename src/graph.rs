@@ -166,6 +166,16 @@ impl Graph {
         id
     }
 
+    /// Replaces a node's headline.
+    ///
+    /// For a reader building a graph from text, where a node can be mentioned
+    /// by an edge before the line that names it.
+    pub fn relabel(&mut self, id: NodeId, label: impl Into<String>) {
+        if let Some(node) = self.nodes.get_mut(id.index()) {
+            node.label = label.into();
+        }
+    }
+
     /// Every node, in insertion order.
     pub fn nodes(&self) -> &[Node] {
         &self.nodes

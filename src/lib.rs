@@ -13,6 +13,7 @@
 
 pub mod colour;
 pub mod graph;
+pub mod io;
 pub mod options;
 
 // Phases land before there is a `layout()` to call them from; the allow comes

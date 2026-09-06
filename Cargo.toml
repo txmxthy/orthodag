@@ -11,7 +11,7 @@ publish = false
 
 [features]
 default = []
-# Read a graph from Mermaid flowchart source.
+# Read a graph from Mermaid flowchart source, and write one back.
 mermaid = []
 # Write Mermaid and DOT back out.
 dot = []
