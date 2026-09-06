@@ -1,0 +1,9 @@
+graph LR
+  n0["source"]
+  n1["split<br>2 partitions"]
+  n2["even"]
+  n3["odd"]
+  n0 --> n1
+  n1 -->|even| n2
+  n1 -->|odd| n3
+  n0 -->|direct, even| n2

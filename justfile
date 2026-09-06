@@ -13,6 +13,10 @@ lint:
 test:
     cargo test --all-features
 
+# rewrite testdata/graphs from the fixtures in tests/common
+corpus:
+    cargo run -q --features mermaid --example corpus
+
 # every fixture scored, worst first
 score *flags="":
     cargo run -q --example score -- {{flags}}
