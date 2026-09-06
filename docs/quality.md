@@ -59,6 +59,32 @@ argument first.
 `tests/quality.rs` lists the fixtures known to be clean, in `CLEAN`. A
 fixture that reaches zero is added to that list and never removed.
 
+## Wider corpus results
+
+To include twelve generated graphs and any files in `testdata/private`,
+run:
+
+```sh
+cargo run --features mermaid --example score -- --wide
+```
+
+The picture there is much worse. One reported score was:
+
+```text
+seed-11  junctions 8 overlaps 54 cross 859 asym 3338 detour 1558  total 11161
+```
+
+Every generated graph falls outside the vocabulary. They are dense, with
+up to fifty nodes across a dozen columns, skips and cycles, and nothing in
+the layout has been tuned against graphs like them. The nine committed
+fixtures are small enough to reason about, which is what they are for.
+They are not evidence that the layout is good.
+
+Two things follow from these numbers. A `junctions` count above zero means
+an edge touches more than one fork or join run, a defect the small
+fixtures never produce. And `asym` dominating the total means the next
+real gain comes from placement, ahead of routing.
+
 ## Regression checks
 
 The second test compares every number against a stored baseline:

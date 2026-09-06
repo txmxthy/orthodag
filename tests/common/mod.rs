@@ -23,6 +23,105 @@ pub fn fixtures() -> Vec<(&'static str, Graph)> {
     ]
 }
 
+/// A pseudo-random graph that is the same graph every time.
+///
+/// Nothing in the library is random. A generator is only here to reach shapes
+/// nobody would sit down and write — several columns, heavy fan-out, skips and a
+/// few cycles at once — and to reach a lot of them cheaply.
+pub fn seeded(seed: u64, nodes: usize, edges: usize) -> Graph {
+    let mut state = seed | 1;
+    let mut next = move || {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (state >> 33) as usize
+    };
+
+    let mut g = Graph::new();
+    let ids: Vec<_> = (0..nodes.max(1))
+        .map(|i| g.add_node(Node::new(format!("n{i}"))))
+        .collect();
+    for _ in 0..edges {
+        let (a, b) = (next() % ids.len(), next() % ids.len());
+        if a == b {
+            continue;
+        }
+        // A tenth point backwards, so cycles are in the mix.
+        let (from, to) = if next() % 10 == 0 {
+            (b, a)
+        } else {
+            (a.min(b), a.max(b))
+        };
+        match next() % 3 {
+            0 => g.add_edge(ids[from], ids[to]),
+            n => g.add_tagged_edge(ids[from], ids[to], [format!("t{n}")]),
+        };
+    }
+    g
+}
+
+/// A spread of generated graphs, small to large.
+pub fn generated(count: usize) -> Vec<(String, Graph)> {
+    (0..count)
+        .map(|at| {
+            let seed = 0x5EED + at as u64;
+            let nodes = 6 + at * 4;
+            (format!("seed-{at:02}"), seeded(seed, nodes, nodes * 2))
+        })
+        .collect()
+}
+
+/// Graphs from `testdata/private`, if there are any.
+///
+/// The directory is git-ignored and usually absent. A library like this is only
+/// honest against graphs somebody actually has, and those are rarely ours to
+/// publish, so every caller of this degrades to doing nothing when the corpus is
+/// not there — the suite runs identically with and without it, and CI never sees
+/// one.
+#[cfg(feature = "mermaid")]
+pub fn corpus() -> Vec<(String, Graph)> {
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/private");
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+
+    let mut paths: Vec<_> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|kind| kind == "mmd"))
+        .collect();
+    paths.sort();
+
+    let mut found = Vec::new();
+    for path in paths {
+        let (Ok(source), Some(stem)) = (
+            std::fs::read_to_string(&path),
+            path.file_stem().and_then(|s| s.to_str()),
+        ) else {
+            continue;
+        };
+        let Ok(read) = orthodag::io::mermaid_in::from_mermaid(&source) else {
+            println!("corpus: {} does not read, skipping", path.display());
+            continue;
+        };
+        for (at, (title, g)) in read.into_iter().enumerate() {
+            let name = if title.is_empty() {
+                format!("{stem}/{at}")
+            } else {
+                format!("{stem}/{title}")
+            };
+            found.push((name, g));
+        }
+    }
+    found
+}
+
+/// Without the reader there is no way to load a corpus from disk.
+#[cfg(not(feature = "mermaid"))]
+pub fn corpus() -> Vec<(String, Graph)> {
+    Vec::new()
+}
+
 fn build(names: &[&str], edges: &[(usize, usize)]) -> Graph {
     let mut g = Graph::new();
     let ids: Vec<_> = names.iter().map(|n| g.add_node(Node::new(*n))).collect();
