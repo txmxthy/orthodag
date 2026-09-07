@@ -1,118 +1,108 @@
-# orthodag — the build plan
+# Build plan
 
-[`design.md`](design.md) says what the library is. This page says how it gets
-built: in what order, what has to be true before each step counts as done, and
-what the tests look like that decide.
-
-The plan was written before the code, for the same reason the design document
-was written first: to decide the build order in advance.
+This document records the implementation sequence and acceptance criteria for
+the library described in [the design](design.md). Implementation has reached the
+documentation stage; Cargo publication is still disabled with `publish = false`.
+Ongoing layout work follows [the quality guide](quality.md).
 
 ## Implementation order
 
-A layered drawing is built as a pipeline of phases: model, ranks, orderings,
-coordinates, routes, characters. Building them in that order, front to back,
-delays all visible output until the last phase lands, so five phases would be
-written before there is any feedback.
+Building the layout pipeline strictly in phase order would delay visible output
+until routing and painting were finished. The plan brings the painter forward
+to step four so that subsequent changes can be reviewed as drawings.
 
-The painter is moved earlier instead, to step four of ten, before anything
-that needs visual judgement. Every step after it changes a drawing that can be
-looked at, diffed and scored. The remaining steps are ordered by what each one
-depends on: routing before tracks, because tracks only matter once routes
-collide; the scorer before track ordering, because track ordering is a search
-and a search needs an objective; colour after tracks, because a colour needs a
-row of its own, and rows are what tracks allocate.
+Basic routing comes before track packing because it exposes the collisions
+that packing must resolve. The scorer comes before track ordering so that the
+search has an objective. Ports and colour follow the initial track work, adding
+the row allocation needed to keep flows distinguishable.
 
-Each step ends with the test suite passing, the lints clean, and a README that
-describes only what actually works.
+Each milestone requires passing tests and lints. The README should describe the
+features available at that point.
 
 ## Milestones
 
-| # | delivers | done when |
+| # | Deliverable | Acceptance criteria |
 |---|---|---|
-| 1 | The graph model, cycle removal, layer assignment. | A chain has ranks. Back edges are identified and removed. |
-| 2 | Dummy vertices, barycenter sweeps, candidate orderings. | A fan-out produces several distinct orderings; the same graph produces the same ones every run. |
-| 3 | Coordinates and orthogonal routes. | Every edge is a polyline in cell coordinates. Crossings exist and nothing panics. |
-| 4 | The painter: direction bits, the glyph table, the canvas. | A chain and a fan draw as box-drawing text. First snapshots land. |
-| 5 | The scorer and the quality gate. | Every committed fixture is at zero on the vocabulary tier, and a regression in the numbers fails a test. |
-| 6 | Tracks: packing, ordering, fan nesting. | A fan reads as one trunk with a branch per target. The soft tier falls and stays down. |
-| 7 | Ports and colour. | No two tag sets share an attach row. Boxes grow to hold the rows they need. |
-| 8 | Merging, back-edge lanes, crossing styles, fitting. | A drawing fits a target width. Two edges drawn as one line reduce `ink`. |
-| 9 | Import, export, and the review gallery. | Mermaid round-trips. Every fixture renders onto one HTML page. |
-| 10 | Documentation, examples, publication. | A stranger can add the crate and draw a graph from the README alone. |
+| 1 | Graph model, cycle removal and layer assignment | A chain has ranks. Back edges are identified and excluded from forward layout. |
+| 2 | Dummy vertices and barycentre ordering sweeps | A fan-out produces distinct candidate orderings, reproducibly. |
+| 3 | Coordinates and orthogonal routes | Every edge has a polyline in cell coordinates. Graphs with crossings can be laid out without panicking. |
+| 4 | Painter and canvas | A chain and a fan render as box-drawing text, covered by snapshots. |
+| 5 | Scorer and quality checks | Every committed fixture has zero vocabulary defects, and tests detect score regressions. |
+| 6 | Track packing, ordering and fan nesting | A fan can share a trunk with a branch per target. Soft scores improve without subsequent regressions. |
+| 7 | Ports and colour | Each distinct tag set has an attach row, and boxes grow to accommodate them. |
+| 8 | Merging, back-edge lanes, crossing styles and fitting | Width fitting reduces drawings where possible. Merging shared paths reduces `ink`. |
+| 9 | Import, export and review gallery | Mermaid round-trips, and all fixtures can be reviewed on one HTML page. |
+| 10 | Documentation, examples and publication | The README gives a new user enough information to add the crate and draw a graph. |
 
-All ten milestones are complete. Whether the drawings are actually good is a
-separate question, covered in `docs/quality.md`.
-
-Steps 1–3 produce no output a human would look at, so they are kept short:
-their purpose is to reach step 4.
+The first three steps were kept small to reach visible output quickly.
+Completion of the milestones does not establish layout quality on larger or
+more varied graphs; that requires continued corpus review.
 
 ## Tests
 
-The tests run in three layers, ordered from cheapest to most expensive. All
-three run with `cargo test`, without configuration or network access.
+The test strategy combines snapshots, invariants and score comparisons. The
+core suite runs with `cargo test`; `cargo test --all-features` also exercises
+optional features. The tests do not require network access.
 
-**Goldens.** Graphs are built in code, rendered, and compared against a stored
-frame. The drawings serve as the specification, so any change that moves a
-character produces a diff for a human to read and accept by hand. There is no
-switch to accept every diff at once, because an accepted change that nobody
-read would defeat the purpose of the check.
+### Snapshots
 
-**Invariants.** These are properties that must hold for every graph in the
-corpus without a stored expectation: the layout is byte-identical when run
-twice, every edge has exactly one route, a route starts and ends on its boxes,
-an edge is coloured if and only if it carries tags, and the whole thing
-finishes inside a time budget expressed in edges.
+Fixtures are built in code, rendered and compared with stored frames. A changed
+character produces a diff for human review. Snapshot updates are accepted
+individually so that a bulk update cannot hide an unwanted layout change.
 
-**The ratchet.** Every fixture is scored and the numbers compared against a
-stored baseline. The vocabulary tier — the categorical defects from
-[`design.md` §6](design.md) — may never rise for any graph, and zero is
-absorbing. The soft tier may rise slightly for one graph if the total across
-all of them falls. The baseline is written by hand, after a change has been
-accepted, and never adjusted to make a change pass.
+### Invariants
+
+These checks cover properties that should hold without a
+stored frame: deterministic output, one route per edge, correct route
+attachments and colour assignment consistent with tags. Search work is limited
+by budgets based on graph size, with a test for the candidate-count limit.
+
+### Score regression checks
+
+Fixtures in the committed `CLEAN` list must retain zero vocabulary defects.
+A separate local test compares scores with a baseline under `target/quality`.
+It rejects any increase in vocabulary defects and limits regressions in other
+fields. The aggregate soft score must not increase.
+
+The baseline is recorded after a change has been reviewed and accepted. It is
+not committed, and the baseline test skips when the file is absent. See
+[the quality guide](quality.md#regression-checks) for commands and tolerances.
 
 ## Corpus
 
-There are two sets: one committed and one not.
+The committed fixtures are small synthetic graphs covering a chain, fan-out,
+fan-in, diamond, skip, cycle, wide layer, ladder and shared target with different
+tag sets. Names identify the affected shape in reviews and commit messages.
+A seeded generator adds larger and denser graphs.
 
-The committed set is synthetic: hand-written graphs, one for each shape that
-needs its own test — a chain, a fan-out, a fan-in, a diamond, a skip, a cycle,
-a wide layer, a graph where two tag sets share a target — plus a seeded
-generator for breadth. They are small enough to read, and named so a commit
-message can identify which one moved.
-
-The second set is a private directory that the tests look for and skip when
-it is absent. It exists because the library can only be judged honestly
-against graphs someone actually uses, and those graphs cannot be published.
-Every test that depends on it degrades to a skip, so the suite runs the same
-with or without it, and CI never receives it.
+An optional private directory provides graphs from actual use that cannot be
+published. Tests and tools that use it skip that input when it is absent. The
+public suite remains runnable without it, although it then covers fewer graphs.
+CI does not receive the private corpus.
 
 ## Review gallery
 
-The scorer reduces a drawing to a single number, and a number cannot show
-everything a drawing can be checked for by eye.
+The gallery renders each graph in several configurations on a static HTML page.
+It supports sorting by name or score and provides space for notes beside each
+frame. This makes it possible to inspect changes that a numerical score does
+not adequately describe.
 
-There is one more tool, outside the library and outside CI: a single static
-HTML page holding every fixture rendered at every width and option worth
-comparing, one tab at a time, sorted by name or by score. Its purpose is to
-be looked at directly. A local helper stores notes against each frame and
-clears them when the frame is regenerated, so notes do not carry over between
-rounds of review.
-
-The gallery runs locally only, and renders whatever corpus is on the machine.
+Notes are stored in the browser. The gallery runs locally and includes whatever
+corpus is present on the machine, so its output may contain private data and
+should not be published. It is a review tool outside the library and CI.
 
 ## Completion requirements
 
-These come from [`design.md` §8](design.md), restated as what a test asserts:
-
-- **Deterministic.** The same graph and options produce the same bytes.
-- **Budgeted.** Every stage that scales with graph size has an explicit budget.
-- **No panics.** No `unwrap` or `expect` outside tests; the lint denies them.
-- **Snapshot-tested.** Every change that moves a character is read by a human.
+- The same graph and options produce identical bytes.
+- Search stages have explicit budgets based on graph size.
+- Clippy rejects `unwrap`, `expect` and explicit panics outside tests.
+- Changes to rendered fixtures receive visual review.
 
 ## Deferred work
 
-Interactivity, hit testing, animation, and any dependency on a terminal
-library are out of scope in the design and out of scope here. A solver-based
-layer assignment and a general constraint system for routing are also
-excluded, though both are tempting. Both may become the right answer
-eventually, but only once there are numbers showing what they would buy.
+Interactivity, hit testing, animation and terminal-library integration remain
+outside the library's scope.
+
+Solver-based layer assignment and a general routing constraint system were also
+deferred. Either would need evidence of a layout improvement large enough to
+justify its complexity and runtime cost.
