@@ -1,9 +1,8 @@
 # Changelog
 
-Notable changes, newest first. Versions follow [semver](https://semver.org/);
-nothing is released yet.
+Notable changes, newest first. Versions follow [semver](https://semver.org/).
 
-## Unreleased
+## 0.1.0
 
 - The graph model: vertices with a label and extra lines, edges with a canonical
   tag set.
@@ -39,3 +38,7 @@ nothing is released yet.
   shrinks the drawing through a ladder of steps to fit a target.
 - Mermaid in and out behind the `mermaid` feature, DOT out behind `dot`.
 - A seeded generator, a loader for a private corpus, and a gallery page.
+
+Everything the design set out to build exists. What the drawings are worth is a
+separate question: the nine committed fixtures are clean bar one, and the
+generated graphs are not clean at all. See `docs/quality.md`.
