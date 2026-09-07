@@ -1,102 +1,84 @@
 # orthodag
 
-orthodag renders a directed graph as Unicode box-drawing text. Vertices
-become boxes, and edges become orthogonal lines that fit a target width
-against an explicit objective for what a good drawing looks like.
-
-> **Status: early.** It draws, though not yet well: there is no scorer, no
-> track packing and no colour, so a fan crosses its own trunk and a long
-> edge can land on another line. [docs/design.md](docs/design.md) sets out
-> what it is meant to be, and [docs/plan.md](docs/plan.md) sets out the
-> order it gets built in.
+orthodag renders a directed graph as Unicode box-drawing text.
 
 ```
-┌────┐     ┌─────┐     ┌─────┐
-│ in │────▶│ cat │────▶│ out │
-└────┘     └─────┘     └─────┘
+                                    ┌──────┐
+                                ┌──▶│ even │─┐
+┌────────┐     ┌──────────────┐ │   └──────┘ │   ┌──────┐
+│ source │────▶│ split        │─┘            └──▶│ sink │
+└────────┘     │ 2 partitions │─┐   ┌──────┐ ┌──▶│      │
+               └──────────────┘ └──▶│ odd  │─┘   └──────┘
+                                    └──────┘
 ```
 
-## The model
+Vertices become boxes, and edges become orthogonal lines that fit a target
+width, against an explicit objective for what a good drawing looks like.
 
-A graph is vertices and edges, built by the caller. Nothing is parsed.
+The default build carries no dependencies, and there is never a dependency
+on a terminal library. The output is text and styled spans, and whether
+those become escape codes, HTML or a widget buffer is the caller's
+business.
+
+> **Status: 0.1.0, early.** Everything documented below works, though
+> whether the drawings are *good* is a separate question, asked and
+> answered in [docs/quality.md](docs/quality.md): the small graphs are
+> fine and the large ones are not yet.
+
+## Start here
+
+```toml
+[dependencies]
+orthodag = "0.1"
+```
 
 ```rust
 use orthodag::{Graph, Node};
 
 let mut g = Graph::new();
 let source = g.add_node(Node::new("source"));
-let even = g.add_node(Node::new("even").line("2 partitions"));
+let split = g.add_node(Node::new("split").line("2 partitions"));
+let even = g.add_node(Node::new("even"));
 let odd = g.add_node(Node::new("odd"));
+let sink = g.add_node(Node::new("sink"));
 
-g.add_tagged_edge(source, even, ["even"]);
-g.add_tagged_edge(source, odd, ["odd"]);
+g.add_edge(source, split);
+g.add_tagged_edge(split, even, ["even"]);
+g.add_tagged_edge(split, odd, ["odd"]);
+g.add_tagged_edge(even, sink, ["even"]);
+g.add_tagged_edge(odd, sink, ["odd"]);
 
 print!("{}", orthodag::draw(&g));
 ```
 
-```
-               ┌──────────────┐
-            ┌─▶│ even         │
-┌────────┐  │  │ 2 partitions │
-│ source │──┤  └──────────────┘
-└────────┘  │
-            │  ┌──────────────┐
-            └─▶│ odd          │
-               └──────────────┘
-```
+That prints the drawing above. Nothing is parsed and nothing is inferred,
+because a graph is exactly what the caller builds.
 
-A vertex carries a headline and any number of further lines drawn under it.
-An edge carries a tag set, sorted and deduplicated on the way in, because
-tags decide two things later: which edges are drawn as one line, and what
+A vertex carries a headline and any number of further lines. An edge
+carries a tag set, sorted and deduplicated on the way in, because tags
+decide two things later: which edges are drawn as one line, and what
 colour a flow keeps across the drawing.
 
-## Where it is
+## Cycles
 
-| phase | state |
-|---|---|
-| the model | done |
-| cycle removal | done — back edges keep their original direction and are routed separately |
-| layer assignment | done — longest path, one column past the latest predecessor |
-| ordering, coordinates, routing | next |
-| the painter | done — direction bits, one glyph per combination |
-| tracks | done — a fan is one trunk with a branch each |
-| ports and colour | done — one attach row per tag set, one slot per flow |
-| lanes, labels, bridges, fitting | done |
-| import, export, the gallery | next |
-| the scorer and the quality gate | done — two of nine fixtures still fail it |
+A back edge is excluded from the layering and drawn on its own, keeping
+its original direction: a reversed arrow reads as pointing the wrong way,
+whatever the rest of the layout looks like. It gets a lane under the
+boxes instead, with an arrowhead that points the way it is going.
 
-`draw`, `spans` and `score` are the entry points so far. The design calls
-for layout, drawing and scoring as three separate calls, so a caller can
-colour one edge or ask what a drawing is worth, though none of that exists
-yet.
-
-Run `cargo run --example draw` to see the drawings above and a couple more,
-and `cargo run --example score` to see what each of them is worth.
-
-## Options
-
-```rust
-use orthodag::{Crossing, Options};
-
-orthodag::draw_with(&g, Options::new().labels(true));                 // tags on the edges
-orthodag::draw_with(&g, Options::new().crossings(Crossing::Bridge));  // ──╴│╶── not ───┼───
-orthodag::draw_with(&g, Options::new().width(80));                    // fit 80 columns
 ```
-
-Asking for a width walks a fixed ladder — roomier gaps first, then shorter
-box text — and stops at the widest rung that fits. If even the last rung is
-too wide, that one comes back, because half a box is worse than a wide
-one, so nothing is ever clipped.
+┌────┐     ┌──────┐     ┌───────┐
+│ in │────▶│ work │────▶│ retry │
+└────┘     └──────┘     └───────┘
+               ▲            │
+               └────────────┘
+```
 
 ## Colour
 
-An edge carries a tag set. Two edges with the same tags are one flow, and a
-flow keeps its slot across the whole drawing; a box grows an interior row
-per tag set so no two flows have to share an attach row and lose one of
-their colours.
-
-`spans` hands back the drawing as runs of one colour, and the caller
-decides what a slot looks like:
+`spans` hands back the drawing as runs of one colour. The library does
+not decide what a colour is: it returns a palette slot, and the caller
+decides what that slot looks like.
 
 ```rust
 for row in orthodag::spans(&g) {
@@ -110,14 +92,40 @@ for row in orthodag::spans(&g) {
 }
 ```
 
-There are six slots, and then they wrap. Nothing here knows what a colour
-is, which is why the crate has no dependency on a terminal library.
+Slots are assigned by tag set, so every edge in that set shares one
+flow's colour across the whole drawing. A box grows an interior row per
+tag set so no two flows have to share an attach row and lose one of their
+colours. There are six slots, and after that they wrap.
+
+A span with no colour is a box, a label, or a cell where two flows met,
+and the caller paints those in whatever its default ink is.
+
+## Options
+
+```rust
+use orthodag::{Crossing, Options};
+
+orthodag::draw_with(&g, Options::new().labels(true));                 // tags on the edges
+orthodag::draw_with(&g, Options::new().crossings(Crossing::Bridge));  // ──╴│╶── not ───┼───
+orthodag::draw_with(&g, Options::new().width(80));                    // fit 80 columns
+```
+
+```
+┌────────┐     ┌──────────────┐      │  └──────┘      │  ┌──────┐
+│ source │────▶│ split        │─even─┘                └─▶│ sink │
+└────────┘     │ 2 partitions │─odd──┐  ┌──────┐      ┌─▶│      │
+```
+
+Asking for a width walks a fixed ladder — roomier gaps first, then
+shorter box text — and stops at the widest rung that fits. If even the
+last rung is too wide, that one comes back instead, because half a box
+is worse than a wide one, so nothing is ever clipped.
 
 ## Scoring
 
-There is an explicit objective, in three tiers: defects that are
+`score` returns an explicit objective in three tiers: defects that are
 categorical and must be zero, a scalar to push down, and numbers reported
-because they are useful to know rather than because they are goals.
+because they are useful rather than because they are goals.
 
 ```
 chain     bends_fwd 0 bends_skip 0 junctions 0 overlaps 0 ... total 0
@@ -129,22 +137,34 @@ ladder had thirty-two of them before the gaps were given tracks, and the
 frame alone did not show that. [docs/quality.md](docs/quality.md) has the
 rules and the loop.
 
-## Building
+## Features
+
+| feature | gives you |
+|---|---|
+| *(none)* | the model, the layout, the painter, the scorer |
+| `mermaid` | `io::mermaid_in::from_mermaid`, `io::mermaid_out::to_mermaid` |
+| `dot` | `io::dot::to_dot` |
+| `serde` | `Serialize`/`Deserialize` on the model and the score |
+
+Round-tripping through Mermaid is tested: a graph written out and read
+back comes back as the same graph.
+
+## Development
 
 ```
-just ci      # fmt --check, clippy pedantic as errors, the test suite
+just ci        # fmt --check, clippy pedantic as errors, the whole suite
+just score     # every graph, worst first
+just gallery   # every graph on one page, to be looked at
 ```
 
-Or without [`just`](https://github.com/casey/just):
+Everything runs offline with no configuration.
 
-```
-cargo fmt --all --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-features
-```
-
-Everything runs offline. There are no required features, and no optional
-dependency is on by default.
+- [docs/design.md](docs/design.md) — what this is meant to be, written before
+  any code.
+- [docs/plan.md](docs/plan.md) — the order it was built in.
+- [docs/painter.md](docs/painter.md) — how edges become glyphs.
+- [docs/quality.md](docs/quality.md) — how a change to the layout is judged, and
+  where it currently falls down.
 
 ## Licence
 
