@@ -120,6 +120,36 @@ pub(crate) fn place(g: &Graph, columns: &Columns, hops: &Hops, interiors: &[usiz
     placed
 }
 
+/// The same placement with one column of boxes moved `delta` rows.
+///
+/// Sweeping only ever pushes a slot down, and `press` only pulls one up when
+/// its column will not otherwise fit, so a drawing has no way back to centre:
+/// fans come out leaning the way the sweep happened to leave them. This is the
+/// move that gives it one — and it is offered rather than applied, because
+/// whether a lean is wrong is a question about the drawing, so the caller
+/// answers it by drawing this and scoring it.
+///
+/// Every box in the column moves together, so they cannot collide with each
+/// other; what changes is where they sit relative to the columns either side.
+/// The placeholders are laid again afterwards, since the rows they were
+/// straightened onto were chosen around the boxes that just moved.
+pub(crate) fn nudge(columns: &Columns, placed: &Placed, column: usize, delta: i32) -> Placed {
+    let mut moved = placed.clone();
+    if let (Some(slots), Some(tops)) = (columns.get(column), moved.tops.get_mut(column)) {
+        for (at, slot) in slots.iter().enumerate() {
+            if matches!(slot, Slot::Node(_))
+                && let Some(top) = tops.get_mut(at)
+            {
+                *top += delta;
+            }
+        }
+    }
+    normalise(&mut moved);
+    straighten(columns, &mut moved);
+    normalise(&mut moved);
+    moved
+}
+
 /// Puts every placeholder of one edge on one row, so a long edge cannot bend.
 ///
 /// The literature gets straight chains of placeholders by aligning them

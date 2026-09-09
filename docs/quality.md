@@ -44,20 +44,16 @@ of a merge.
 
 ## Committed fixtures
 
-Eight of the nine fixtures are inside the vocabulary. One is not:
+All nine fixtures are inside the vocabulary, and `tests/quality.rs` holds
+every one of them in `CLEAN`.
 
-| Fixture | Defect |
-|---|---|
-| `ladder` | 4 overlaps: two runs turning on each other's corner rows |
-
-`ladder`'s edges carry no tags, so every edge at a box shares the one
-attach row the empty tag set gets, and the rows that would separate the
-two runs do not exist. Giving an untagged fan rows of its own is the
-obvious next move. It is not in the design as written, and it needs an
-argument first.
-
-`tests/quality.rs` lists the fixtures known to be clean, in `CLEAN`. A
-fixture that reaches zero is added to that list and never removed.
+The last fixture to reach zero was `ladder`, which had 4 overlaps caused
+by untagged routes turning on each other's corner rows. The initial
+diagnosis suggested that untagged fans needed separate attach rows.
+Placement descent resolved the overlaps by moving the column responsible
+for both runs sitting on the same rows, so the port change was not needed
+for this fixture. It remains available if another graph needs it; none
+does today.
 
 ## Wider corpus results
 
@@ -68,22 +64,19 @@ run:
 cargo run --features mermaid --example score -- --wide
 ```
 
-The picture there is much worse. One reported score was:
+That run contained seventy-one graphs, of which seven generated graphs
+had vocabulary defects. The generated cases include graphs with up to
+fifty nodes across a dozen columns, with skips and cycles. One reported
+score was:
 
 ```text
-seed-11  junctions 8 overlaps 54 cross 859 asym 3338 detour 1558  total 11161
+seed-11  junctions 0 overlaps 0 cross 299 asym 1564 detour 554  total 4579
 ```
 
-Every generated graph falls outside the vocabulary. They are dense, with
-up to fifty nodes across a dozen columns, skips and cycles, and nothing in
-the layout has been tuned against graphs like them. The nine committed
-fixtures are small enough to reason about, which is what they are for.
-They are not evidence that the layout is good.
-
-Two things follow from these numbers. A `junctions` count above zero means
-an edge touches more than one fork or join run, a defect the small
-fixtures never produce. And `asym` dominating the total means the next
-real gain comes from placement, ahead of routing.
+That run had no overlaps. Excess junctions remain on three generated
+graphs, while crossings and asymmetry account for most of the remaining
+soft cost. The small committed fixtures are useful for diagnosing
+specific behaviours but do not establish quality on these larger graphs.
 
 ## Regression checks
 

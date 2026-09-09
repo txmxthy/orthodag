@@ -92,22 +92,90 @@ fn build_at(g: &Graph, style: route::Style) -> route::Layout {
     let hops = order::Hops::of(&layered);
     let interiors = port::interiors(g, &acyclic);
 
-    let draw = |columns: &order::Columns| {
-        let placed = place::place(g, columns, &hops, &interiors);
-        let ports = port::rows(g, &acyclic, columns, &placed);
-        route::route(g, &acyclic, columns, &placed, &ports, style)
+    let draw = |columns: &order::Columns, placed: &place::Placed| {
+        let ports = port::rows(g, &acyclic, columns, placed);
+        route::route(g, &acyclic, columns, placed, &ports, style)
+    };
+    // Tier before scalar: a categorical defect is not a large cost, it is a
+    // different kind of thing, and no total buys one back.
+    let worth = |layout: &route::Layout| {
+        let score = crate::score::score(g, layout);
+        (score.vocabulary().iter().sum::<usize>(), score.total)
     };
 
     let mut best: Option<((usize, i64), route::Layout)> = None;
     for columns in order::orderings(&layered).iter().take(drawn(g)) {
-        let layout = draw(columns);
-        let score = crate::score::score(g, &layout);
-        let key = (score.vocabulary().iter().sum(), score.total);
+        let placed = settle(g, columns, &hops, &interiors, &draw, &worth);
+        let layout = draw(columns, &placed);
+        let key = worth(&layout);
         if best.as_ref().is_none_or(|(held, _)| key < *held) {
             best = Some((key, layout));
         }
     }
     best.map_or_else(route::Layout::default, |(_, layout)| layout)
+}
+
+/// Places one ordering, then hill-climbs the placement by drawing it.
+///
+/// Median placement gets the rows roughly right and has no way to correct a
+/// lean, because a sweep only pushes down. So each column is offered up and
+/// down a row or two, in turn, and a move is kept only when the drawing it
+/// makes is better. Coordinate descent, with the objective as the only judge.
+///
+/// Passes stop early when a whole sweep of the columns changes nothing, which
+/// is what a local minimum looks like from here.
+fn settle(
+    g: &Graph,
+    columns: &order::Columns,
+    hops: &order::Hops,
+    interiors: &[usize],
+    draw: &impl Fn(&order::Columns, &place::Placed) -> route::Layout,
+    worth: &impl Fn(&route::Layout) -> (usize, i64),
+) -> place::Placed {
+    let mut placed = place::place(g, columns, hops, interiors);
+    let Some(passes) = climbed(g) else {
+        return placed;
+    };
+    let mut best = worth(&draw(columns, &placed));
+
+    for _ in 0..passes {
+        let mut moved = false;
+        for column in 0..columns.len() {
+            for delta in OFFERS {
+                let trial = place::nudge(columns, &placed, column, delta);
+                let key = worth(&draw(columns, &trial));
+                if key < best {
+                    best = key;
+                    placed = trial;
+                    moved = true;
+                }
+            }
+        }
+        if !moved {
+            break;
+        }
+    }
+    placed
+}
+
+/// How far a column is offered up and down, nearest first.
+///
+/// Two rows either way. One is too little to clear a box and three is far
+/// enough that the drawing it makes is a different drawing rather than the same
+/// one corrected — and the descent can reach three by taking two twice.
+const OFFERS: [i32; 4] = [-1, 1, -2, 2];
+
+/// How many passes of the descent a graph is worth, or `None` for none at all.
+///
+/// A pass draws the graph `columns × 4` times, on top of the candidate
+/// orderings already being drawn, so this is the most expensive budget in the
+/// library and it is the first one to run out.
+fn climbed(g: &Graph) -> Option<usize> {
+    match g.edges().len() {
+        0..=48 => Some(3),
+        49..=128 => Some(1),
+        _ => None,
+    }
 }
 
 /// How many candidate orderings are drawn before one is chosen.
@@ -132,7 +200,7 @@ fn drawn(g: &Graph) -> usize {
 mod tests {
     use super::Adjacency;
     use super::{acyclic::back_edges, build, layer::layer, order, rank::rank};
-    use crate::graph::{Edge, Graph, Node};
+    use crate::graph::{Graph, Node};
     use crate::options::Options;
 
     /// A pseudo-random graph that is the same graph every time.
@@ -262,10 +330,12 @@ mod tests {
         let drawing = build(&g, Options::default());
         assert_eq!(drawing.routes.len(), 3, "the loop is drawn too");
 
+        // By which edge it is, not by what shape it came out: a forward edge
+        // into the same box is free to bend too, and once it did this found it.
         let loop_back = drawing
             .routes
             .iter()
-            .find(|r| g.edge(r.edge).map(Edge::to) == Some(ids[1]) && r.points.len() > 2)
+            .find(|r| g.edge(r.edge).map(|e| (e.from(), e.to())) == Some((ids[2], ids[1])))
             .expect("the back edge is routed");
         let source = drawing.boxed(ids[2]).expect("its source is drawn");
         let target = drawing.boxed(ids[1]).expect("its target is drawn");

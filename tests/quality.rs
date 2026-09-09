@@ -26,11 +26,12 @@ use orthodag::Score;
 
 /// Fixtures whose drawings are known to be inside the vocabulary today.
 ///
-/// Every fixture belongs here. `ladder` and `two-tags` do not yet: they draw
-/// unrelated edges on top of each other, which needs track packing to fix. The
-/// list is the ratchet — a fixture that reaches zero is added and never removed.
+/// Every fixture belongs here, and now every fixture is here. `ladder` was the
+/// last holdout: its two untagged runs turned on each other's corner rows, and
+/// the placement descent moved the column that made them do it. The list is the
+/// ratchet — a fixture that reaches zero is added and never removed.
 const CLEAN: &[&str] = &[
-    "chain", "cycle", "diamond", "fan-in", "fan-out", "skip", "wide",
+    "chain", "cycle", "diamond", "fan-in", "fan-out", "ladder", "skip", "two-tags", "wide",
 ];
 
 fn scores() -> BTreeMap<String, Score> {
@@ -68,7 +69,7 @@ fn every_fixture_that_is_not_clean_is_named() {
         .filter(|(_, s)| s.vocabulary() != [0; 4])
         .map(|(name, _)| name.clone())
         .collect();
-    let expected = ["ladder"];
+    let expected: [&str; 0] = [];
 
     assert_eq!(
         known, expected,
