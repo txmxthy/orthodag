@@ -47,9 +47,8 @@ impl Adjacency {
 
 /// Everything, in order: acyclic, ranked, layered, ordered, placed, routed.
 ///
-/// The ordering phase proposes several candidates and this takes the first.
-/// Choosing between them means drawing each one and scoring the drawing, and
-/// there is nothing to draw with yet.
+/// The ordering phase proposes several candidates; each is laid out in full and
+/// scored, and the best drawing wins. See [`build_at`].
 pub(crate) fn build(g: &Graph, options: Options) -> route::Layout {
     let Some(target) = options.width.and_then(|w| i32::try_from(w).ok()) else {
         return build_at(g, route::Style::natural(options));
@@ -74,20 +73,59 @@ pub(crate) fn build(g: &Graph, options: Options) -> route::Layout {
     narrowest.unwrap_or_default()
 }
 
+/// One drawing at one rung of the ladder, chosen by drawing the candidates.
+///
+/// A barycenter sweep reads the layered graph, and the layered graph is not
+/// what a reader sees: it cannot tell that a box hides a crossing, or that two
+/// runs merged into one apparent line. So each ordering it proposed is placed,
+/// routed and scored, and the drawing decides.
+///
+/// Tier before scalar, as everywhere: a candidate with fewer categorical
+/// defects wins whatever it costs on the total, because a glyph that reads
+/// wrong is not worse, it is broken. Ties keep the earliest candidate, which is
+/// the one the sweeps reached first, so the choice is deterministic.
 fn build_at(g: &Graph, style: route::Style) -> route::Layout {
     let adj = Adjacency::of(g);
     let acyclic = acyclic::back_edges(g, &adj);
     let ranked = rank::rank(g, &adj, &acyclic);
     let layered = layer::layer(g, &adj, &acyclic, &ranked);
     let hops = order::Hops::of(&layered);
-    let columns = order::orderings(&layered)
-        .into_iter()
-        .next()
-        .unwrap_or_default();
     let interiors = port::interiors(g, &acyclic);
-    let placed = place::place(g, &columns, &hops, &interiors);
-    let ports = port::rows(g, &acyclic, &columns, &placed);
-    route::route(g, &acyclic, &columns, &placed, &ports, style)
+
+    let draw = |columns: &order::Columns| {
+        let placed = place::place(g, columns, &hops, &interiors);
+        let ports = port::rows(g, &acyclic, columns, &placed);
+        route::route(g, &acyclic, columns, &placed, &ports, style)
+    };
+
+    let mut best: Option<((usize, i64), route::Layout)> = None;
+    for columns in order::orderings(&layered).iter().take(drawn(g)) {
+        let layout = draw(columns);
+        let score = crate::score::score(g, &layout);
+        let key = (score.vocabulary().iter().sum(), score.total);
+        if best.as_ref().is_none_or(|(held, _)| key < *held) {
+            best = Some((key, layout));
+        }
+    }
+    best.map_or_else(route::Layout::default, |(_, layout)| layout)
+}
+
+/// How many candidate orderings are drawn before one is chosen.
+///
+/// Drawing a candidate is a place, a route and a score over every cell, so this
+/// is the budget on the most expensive stage in the pipeline and it is
+/// expressed in edges. The sweeps propose nine at most; a small graph can
+/// afford all of them and a large one cannot afford two.
+///
+/// The numbers are where the drawing stops paying: past a few dozen edges the
+/// orderings differ in places no single drawing is going to fix, and the gain
+/// per candidate drawn falls off faster than the cost does.
+fn drawn(g: &Graph) -> usize {
+    match g.edges().len() {
+        0..=48 => usize::MAX,
+        49..=128 => 4,
+        _ => 1,
+    }
 }
 
 #[cfg(test)]
