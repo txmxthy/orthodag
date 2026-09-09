@@ -8,11 +8,12 @@
 //! The classical move is a barycenter sweep: sort a column by the mean position
 //! of each slot's neighbours in the column beside it, and alternate direction
 //! until it settles. It is a heuristic and it does settle, usually on something
-//! good.
+//! good. Sorting by the median instead is the other classical move, and neither
+//! beats the other on every graph, so both sweep and both propose.
 //!
-//! The mean is kept as an exact rational rather than a float. Two slots whose
-//! barycenters are equal must compare equal every run, on every machine, or the
-//! drawing changes between runs for no reason a reader could see.
+//! Either reading is kept as an exact rational rather than a float. Two slots
+//! that land on the same spot must compare equal every run, on every machine,
+//! or the drawing changes between runs for no reason a reader could see.
 
 use std::cmp::Ordering;
 
@@ -21,10 +22,30 @@ use super::layer::{Layered, Segment, Slot};
 /// The order of every column, top to bottom.
 pub(crate) type Columns = Vec<Vec<Slot>>;
 
-/// The mean position of a slot's neighbours, held exactly.
+/// Which reading of "where a slot's neighbours are" a sweep sorts by.
+///
+/// Barycenter is the mean and median is the middle, and neither dominates: the
+/// mean is dragged by one neighbour at the far end of a column, and the median
+/// ignores how far away everything is. The literature picks one and argues. Here
+/// both sweep, both propose, and the drawing decides — which is what the
+/// candidate set is for.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Read {
+    /// The mean position. One distant neighbour moves the slot.
+    Mean,
+    /// The middle position, or the mean of the middle two. Outliers do not.
+    Middle,
+}
+
+/// Where a slot's neighbours put it, held exactly.
 ///
 /// A slot with no neighbours in the column being read from takes its own
 /// position, so it stays where it is instead of collapsing to the top.
+///
+/// Both readings are rationals — the median of an even number of neighbours is
+/// the mean of the middle two — so one comparison serves both, and it is exact.
+/// Two slots that land on the same spot must compare equal every run, on every
+/// machine, or the drawing changes for no reason a reader could see.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct Bary {
     total: u64,
@@ -32,16 +53,34 @@ struct Bary {
 }
 
 impl Bary {
-    fn of(positions: &[usize], fallback: usize) -> Self {
+    fn of(read: Read, positions: &[usize], fallback: usize) -> Self {
         if positions.is_empty() {
             return Self {
                 total: fallback as u64,
                 count: 1,
             };
         }
-        Self {
-            total: positions.iter().map(|p| *p as u64).sum(),
-            count: positions.len() as u64,
+        match read {
+            Read::Mean => Self {
+                total: positions.iter().map(|p| *p as u64).sum(),
+                count: positions.len() as u64,
+            },
+            Read::Middle => {
+                let mut sorted: Vec<u64> = positions.iter().map(|p| *p as u64).collect();
+                sorted.sort_unstable();
+                let at = sorted.len() / 2;
+                if sorted.len() % 2 == 1 {
+                    Self {
+                        total: sorted[at],
+                        count: 1,
+                    }
+                } else {
+                    Self {
+                        total: sorted[at - 1] + sorted[at],
+                        count: 2,
+                    }
+                }
+            }
         }
     }
 }
@@ -91,7 +130,7 @@ fn position(columns: &Columns, column: usize, slot: Slot) -> Option<usize> {
 ///
 /// Ties keep the order they had: the sort is stable, so a sweep never reshuffles
 /// slots it has no opinion about.
-fn sweep_down(columns: &mut Columns, hops: &Hops, column: usize) {
+fn sweep_down(columns: &mut Columns, hops: &Hops, read: Read, column: usize) {
     let Some(previous) = column.checked_sub(1) else {
         return;
     };
@@ -108,7 +147,7 @@ fn sweep_down(columns: &mut Columns, hops: &Hops, column: usize) {
                         .filter(|s| s.to == *slot)
                         .filter_map(|s| position(columns, previous, s.from))
                         .collect();
-                    (*slot, Bary::of(&neighbours, at))
+                    (*slot, Bary::of(read, &neighbours, at))
                 })
                 .collect::<Vec<_>>()
         })
@@ -117,7 +156,7 @@ fn sweep_down(columns: &mut Columns, hops: &Hops, column: usize) {
 }
 
 /// Sorts one column by the mean position of its neighbours in the one after it.
-fn sweep_up(columns: &mut Columns, hops: &Hops, column: usize) {
+fn sweep_up(columns: &mut Columns, hops: &Hops, read: Read, column: usize) {
     let keys: Vec<_> = columns
         .get(column)
         .map(|slots| {
@@ -131,7 +170,7 @@ fn sweep_up(columns: &mut Columns, hops: &Hops, column: usize) {
                         .filter(|s| s.from == *slot)
                         .filter_map(|s| position(columns, column + 1, s.to))
                         .collect();
-                    (*slot, Bary::of(&neighbours, at))
+                    (*slot, Bary::of(read, &neighbours, at))
                 })
                 .collect::<Vec<_>>()
         })
@@ -155,37 +194,42 @@ const MAX_SWEEPS: usize = 8;
 
 /// Every distinct column order the sweeps propose, the initial one first.
 ///
-/// A sweep is a **proposal, not a decision**. Barycenter is a heuristic reading
+/// A sweep is a **proposal, not a decision**. Both readings are heuristics over
 /// the layered graph, and the layered graph is not what a reader sees: it cannot
 /// tell that a box hides a crossing, or that two runs merge into one apparent
-/// line. So every distinct order it passes through is kept, and the choice
-/// between them is made later, by drawing them and scoring the drawings.
+/// line. So every distinct order either of them passes through is kept, and the
+/// choice between them is made later, by drawing them and scoring the drawings.
 ///
-/// Sweeping stops as soon as it repeats itself, which is what settling looks
-/// like from here.
+/// Each reading starts again from the initial order rather than from where the
+/// other one stopped, so neither inherits the other's local minimum. Sweeping
+/// stops as soon as it repeats itself, which is what settling looks like from
+/// here, and an order one reading already proposed is not proposed twice.
 pub(crate) fn orderings(l: &Layered) -> Vec<Columns> {
     let hops = Hops::of(l);
-    let mut current = l.all().to_vec();
-    let mut candidates = vec![current.clone()];
+    let initial = l.all().to_vec();
+    let mut candidates = vec![initial.clone()];
 
-    for _ in 0..MAX_SWEEPS {
-        sweep(&mut current, &hops);
-        if candidates.contains(&current) {
-            break;
+    for read in [Read::Mean, Read::Middle] {
+        let mut current = initial.clone();
+        for _ in 0..MAX_SWEEPS {
+            sweep(&mut current, &hops, read);
+            if candidates.contains(&current) {
+                break;
+            }
+            candidates.push(current.clone());
         }
-        candidates.push(current.clone());
     }
 
     candidates
 }
 
 /// One pass over every column, left to right then right to left.
-pub(crate) fn sweep(columns: &mut Columns, hops: &Hops) {
+pub(crate) fn sweep(columns: &mut Columns, hops: &Hops, read: Read) {
     for column in 1..columns.len() {
-        sweep_down(columns, hops, column);
+        sweep_down(columns, hops, read, column);
     }
     for column in (0..columns.len().saturating_sub(1)).rev() {
-        sweep_up(columns, hops, column);
+        sweep_up(columns, hops, read, column);
     }
 }
 
@@ -212,7 +256,7 @@ mod tests {
     fn swept(l: &Layered) -> Columns {
         let hops = Hops::of(l);
         let mut columns = l.all().to_vec();
-        sweep(&mut columns, &hops);
+        sweep(&mut columns, &hops, Read::Mean);
         columns
     }
 
@@ -225,6 +269,41 @@ mod tests {
         let half = Bary { total: 1, count: 2 };
         assert!(third < two_fifths && two_fifths < half);
         assert_eq!(third.cmp(&Bary { total: 2, count: 6 }), Ordering::Equal);
+    }
+
+    /// The case the two readings disagree on, which is the reason to keep both.
+    ///
+    /// Four neighbours at 0, 1, 2 and 9: the mean is 3 and the middle is 1½, so
+    /// one slot follows the outlier and the other does not.
+    #[test]
+    fn the_middle_ignores_an_outlier_the_mean_follows() {
+        let at = [0, 1, 2, 9];
+        let mean = Bary::of(Read::Mean, &at, 0);
+        let middle = Bary::of(Read::Middle, &at, 0);
+
+        assert_eq!(mean.cmp(&Bary { total: 3, count: 1 }), Ordering::Equal);
+        assert_eq!(middle.cmp(&Bary { total: 3, count: 2 }), Ordering::Equal);
+        assert!(middle < mean);
+    }
+
+    /// An odd count has a middle of its own, and it is one of the positions.
+    #[test]
+    fn the_middle_of_an_odd_run_is_a_position() {
+        assert_eq!(
+            Bary::of(Read::Middle, &[0, 4, 100], 0).cmp(&Bary { total: 4, count: 1 }),
+            Ordering::Equal
+        );
+    }
+
+    /// Neither reading has an opinion about a slot with no neighbours.
+    #[test]
+    fn neither_reading_moves_a_slot_with_nothing_to_read() {
+        for read in [Read::Mean, Read::Middle] {
+            assert_eq!(
+                Bary::of(read, &[], 7).cmp(&Bary { total: 7, count: 1 }),
+                Ordering::Equal
+            );
+        }
     }
 
     #[test]
@@ -245,7 +324,7 @@ mod tests {
             vec![Slot::Node(ids[2]), Slot::Node(ids[0])],
             vec![Slot::Node(ids[1])],
         ];
-        sweep(&mut columns, &Hops::of(&l));
+        sweep(&mut columns, &Hops::of(&l), Read::Mean);
         assert_eq!(columns[0], [Slot::Node(ids[2]), Slot::Node(ids[0])]);
     }
 
@@ -257,7 +336,7 @@ mod tests {
             vec![Slot::Node(ids[0]), Slot::Node(ids[1])],
             vec![Slot::Node(ids[2]), Slot::Node(ids[3])],
         ];
-        sweep(&mut columns, &Hops::of(&l));
+        sweep(&mut columns, &Hops::of(&l), Read::Mean);
         assert_eq!(columns[1], [Slot::Node(ids[3]), Slot::Node(ids[2])]);
     }
 

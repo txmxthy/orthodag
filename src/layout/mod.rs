@@ -262,10 +262,11 @@ mod tests {
 
     #[test]
     fn the_candidate_count_stays_inside_its_budget() {
-        // Nine: the initial order, plus at most one per sweep.
+        // Seventeen: the initial order, plus at most one per sweep, for each
+        // of the two readings.
         for seed in 1..24u64 {
             assert!(
-                pipeline(&seeded(seed, 120, 300)).len() <= 9,
+                pipeline(&seeded(seed, 120, 300)).len() <= 17,
                 "seed {seed} ran long"
             );
         }

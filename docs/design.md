@@ -111,9 +111,12 @@ An edge spanning several columns is split into single-hop segments with
 dummy vertices between them, so crossings decompose into independent
 adjacent-layer problems.
 
-An alternating barycentre sweep sorts each column by the mean position of
-its neighbours in the column beside it. The barycentre key is an exact
-rational rather than a float, so ties break the same way on every run.
+The ordering pass tries both a barycentre sweep and a median sweep from the
+initial order. A barycentre is pulled off course by one neighbour far down
+the column; a median cannot tell how far away a neighbour sits, so it treats
+a small gap and a large one the same. Neither sweep wins on every graph.
+Both use an exact rational key rather than a float, so ties break the same
+way on every run.
 
 Candidates are judged by drawing them: each distinct ordering a sweep
 produces is laid out, painted in full and scored on the cell grid, and the
@@ -135,9 +138,13 @@ straightness structural instead: a dummy chain simply has no way to bend.
 The cost is that a dummy has no row of its own, which rules out adding an
 independent alignment pass on top later.
 
-A budgeted local search follows: re-sweep, nudge a box toward the middle of
-its fan, or shift a whole column. It hill-climbs on a cheap geometric proxy
-and draws only the handful of best states it accepts.
+The median sweep only ever pushes a box down, and compaction only pulls one
+up when its column would not otherwise fit, so neither step can recentre a
+drawing on its own. A budgeted local search, run as coordinate descent,
+corrects this: each column is offered a shift of a row or two in either
+direction, and a shift is kept only when the resulting drawing scores
+better. Each candidate is judged by drawing it rather than by a cheap
+geometric proxy, since a proxy could not see a crossing that a box hides.
 
 ### 4.5 Track packing and routing
 
