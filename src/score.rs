@@ -12,7 +12,7 @@
 use std::fmt;
 
 use crate::graph::{EdgeId, Graph};
-use crate::layout::route::{Layout, Route};
+use crate::layout::route::{Boxed, Layout, Route};
 use crate::paint::grid::{D, L, R, U, walk};
 
 /// What one edge left in one cell.
@@ -453,6 +453,12 @@ pub(crate) fn score(g: &Graph, layout: &Layout) -> Score {
 /// Which routes belong to which box comes from the graph, not from where the
 /// route happens to start. Every box in a column shares an x, so matching on
 /// coordinates gives each of them the whole column's edges.
+///
+/// An edge through a lane is not part of the fan. It leaves the bottom of its
+/// source and comes up into the bottom of its target, which is a different
+/// vocabulary from the branches that leave a box sideways, and counting it as a
+/// branch makes the fan lean by however deep the lane is. Left in, it buys the
+/// symmetry back by bending a forward edge that had no reason to bend.
 fn asymmetry(g: &Graph, layout: &Layout) -> i64 {
     let mut total = 0;
     for boxed in &layout.boxes {
@@ -464,12 +470,14 @@ fn asymmetry(g: &Graph, layout: &Layout) -> i64 {
                 continue;
             };
             if edge.from() == boxed.node
+                && !through_lane(route.points.first(), boxed)
                 && let Some(y) = leaving(route)
             {
                 out += i64::from(y) - row;
                 fans_out += 1;
             }
             if edge.to() == boxed.node
+                && !through_lane(route.points.last(), boxed)
                 && let Some(y) = arriving(route)
             {
                 into += i64::from(y) - row;
@@ -486,6 +494,16 @@ fn asymmetry(g: &Graph, layout: &Layout) -> i64 {
         }
     }
     total
+}
+
+/// Whether an edge meets this box below it, which is what a lane looks like.
+///
+/// A forward edge attaches on one of the box's own rows; an edge through a lane
+/// attaches at the bottom border and drops out of it. Read off the drawing
+/// rather than asked of the graph, so a drawing this library did not make is
+/// judged by the same rule.
+fn through_lane(end: Option<&(i32, i32)>, boxed: &Boxed) -> bool {
+    end.is_some_and(|(_, y)| *y >= boxed.y + boxed.h - 1)
 }
 
 /// The row an edge is on once it has turned away from its source.
