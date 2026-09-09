@@ -61,6 +61,7 @@ impl Raster {
     /// An edge that passes through a cell twice — which routing should not
     /// produce and the scorer should not hide — appears once, with the union of
     /// what it left.
+    #[cfg(test)]
     pub(crate) fn at(&self, x: i32, y: i32) -> &[Ink] {
         self.index(x, y).map_or(&[], |at| self.cells[at].as_slice())
     }

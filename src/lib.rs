@@ -12,6 +12,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 pub mod colour;
+pub mod drawing;
 pub mod graph;
 pub mod io;
 pub mod options;
@@ -22,9 +23,9 @@ pub mod options;
 mod layout;
 #[allow(dead_code)]
 mod paint;
-#[allow(dead_code)]
 mod score;
 
+pub use drawing::{Drawing, Rect};
 pub use paint::Span;
 pub use score::Score;
 
@@ -110,4 +111,17 @@ pub fn score(graph: &Graph) -> Score {
 /// What the drawing of a graph is worth, with options.
 pub fn score_with(graph: &Graph, options: Options) -> Score {
     score::score(graph, &layout::build(graph, options))
+}
+
+/// What a drawing built by the caller is worth.
+///
+/// The same objective [`score`] applies to this library's own output, applied
+/// to a [`Drawing`] a caller built instead. One implementation of the metrics
+/// serves both.
+///
+/// The graph is still needed — which edges share a source, how many columns an
+/// edge crosses and therefore how many bends it is allowed are facts about the
+/// graph, not about the picture.
+pub fn score_drawing(graph: &Graph, drawing: &Drawing) -> Score {
+    score::score(graph, drawing.layout())
 }
