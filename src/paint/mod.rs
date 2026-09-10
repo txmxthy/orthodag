@@ -41,8 +41,10 @@ pub(crate) fn draw(g: &Graph, layout: &Layout, options: Options) -> Canvas {
         }
     }
 
-    if options.crossings == Crossing::Bridge {
-        canvas.bridge(&score::crossing_cells(g, layout));
+    match options.crossings {
+        Crossing::Bridge => canvas.bridge(&score::crossing_cells(g, layout)),
+        Crossing::ByColour => canvas.bridge(&score::parted_crossing_cells(g, layout)),
+        Crossing::Cross => {}
     }
 
     for label in &layout.labels {

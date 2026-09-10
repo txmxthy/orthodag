@@ -3,14 +3,22 @@
 /// How a cell where two edges genuinely pass each other is drawn.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Crossing {
-    /// The union of both edges' bits, `───┼───`.
+    /// A bridge where the two flows differ, a junction where they do not.
+    ///
+    /// The default, because a junction glyph says "these are one line" and
+    /// where the two runs belong to different flows that is a lie the reader
+    /// cannot see through — the cell holds one character and therefore one of
+    /// the two colours. Where both runs are the same colour there is nothing to
+    /// tell apart, and `┼` is then the honest glyph as well as the tidier one.
+    #[default]
+    ByColour,
+    /// The union of both edges' bits, `───┼───`, everywhere.
     ///
     /// The same glyph a fork leaves where a straight sibling passes through, so
-    /// a crossing and a junction look alike. That is the cost, and it is the
-    /// default because it is what the box-drawing block is for.
-    #[default]
+    /// a crossing and a junction look alike. What the box-drawing block is for,
+    /// and right when nothing is coloured.
     Cross,
-    /// The vertical reads as passing over: `──╴│╶──`.
+    /// The vertical reads as passing over: `──╴│╶──`, at every crossing.
     ///
     /// The horizontal is cut one cell either side, and only where the neighbour
     /// is plain line — a corner or a junction beside a crossing stays put.

@@ -395,6 +395,43 @@ impl fmt::Display for Score {
 /// objective's business, and a painter that disagreed with the scorer about it
 /// would draw a bridge over something the numbers called an overlap.
 pub(crate) fn crossing_cells(g: &Graph, layout: &Layout) -> Vec<(i32, i32)> {
+    cells_where_crossing(g, layout, false)
+}
+
+/// The crossing cells where the two runs are different colours.
+///
+/// A junction glyph says "these are one line"; where the two runs belong to
+/// different flows that is a lie, and the cell can only hold one of the two
+/// colours anyway. Where they are the same colour there is nothing to tell
+/// apart and the junction is the honest glyph.
+pub(crate) fn parted_crossing_cells(g: &Graph, layout: &Layout) -> Vec<(i32, i32)> {
+    cells_where_crossing(g, layout, true)
+}
+
+fn cells_where_crossing(g: &Graph, layout: &Layout, parted: bool) -> Vec<(i32, i32)> {
+    if !parted {
+        return raw_crossing_cells(g, layout);
+    }
+    let colours = crate::colour::of(g);
+    let slot = |edge: EdgeId| colours.get(edge.index()).copied().flatten();
+    Raster::of(layout)
+        .drawn()
+        .filter(|(_, _, ink)| {
+            ink.iter().enumerate().any(|(at, one)| {
+                ink[at + 1..].iter().any(|other| {
+                    crossing(one.bits, other.bits)
+                        && matches!(
+                            (slot(one.edge), slot(other.edge)),
+                            (Some(a), Some(b)) if a != b
+                        )
+                })
+            })
+        })
+        .map(|(x, y, _)| (x, y))
+        .collect()
+}
+
+fn raw_crossing_cells(g: &Graph, layout: &Layout) -> Vec<(i32, i32)> {
     Raster::of(layout)
         .drawn()
         .filter(|(_, _, ink)| {
