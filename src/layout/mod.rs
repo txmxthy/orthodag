@@ -103,16 +103,90 @@ fn build_at(g: &Graph, style: route::Style) -> route::Layout {
         (score.vocabulary().iter().sum::<usize>(), score.total)
     };
 
-    let mut best: Option<((usize, i64), route::Layout)> = None;
+    let mut best: Option<((usize, i64), order::Columns)> = None;
     for columns in order::orderings(&layered).iter().take(drawn(g)) {
         let placed = settle(g, columns, &hops, &interiors, &draw, &worth);
-        let layout = draw(columns, &placed);
-        let key = worth(&layout);
+        let key = worth(&draw(columns, &placed));
         if best.as_ref().is_none_or(|(held, _)| key < *held) {
-            best = Some((key, layout));
+            best = Some((key, columns.clone()));
         }
     }
-    best.map_or_else(route::Layout::default, |(_, layout)| layout)
+    let Some((_, columns)) = best else {
+        return route::Layout::default();
+    };
+
+    let columns = shuffle(g, &columns, &hops, &interiors, &draw, &worth);
+    let placed = settle(g, &columns, &hops, &interiors, &draw, &worth);
+    draw(&columns, &placed)
+}
+
+/// Swaps neighbours in a column while that makes the drawing better.
+///
+/// The sweeps propose orderings by reading the layered graph, and the layered
+/// graph cannot see a crossing: whether two edges cross is a fact about the
+/// drawing, and nothing counts one until a candidate has been drawn. So the
+/// sweeps get the ordering close and this walks it the rest of the way, one
+/// adjacent swap at a time, keeping a swap only when the drawing improves.
+///
+/// It runs on the winning ordering rather than on all of them. A swap costs a
+/// place, a route and a score, and spending that on candidates already known to
+/// be worse buys nothing.
+///
+/// Placement is left to its plain sweeps here rather than its own descent —
+/// this is asking which order reads better, and settling every trial first
+/// would multiply two searches together for an answer neither of them changes.
+fn shuffle(
+    g: &Graph,
+    from: &order::Columns,
+    hops: &order::Hops,
+    interiors: &[usize],
+    draw: &impl Fn(&order::Columns, &place::Placed) -> route::Layout,
+    worth: &impl Fn(&route::Layout) -> (usize, i64),
+) -> order::Columns {
+    let mut columns = from.clone();
+    let Some(passes) = swapped(g) else {
+        return columns;
+    };
+    let placed = place::place(g, &columns, hops, interiors);
+    let mut best = worth(&draw(&columns, &placed));
+
+    for _ in 0..passes {
+        let mut moved = false;
+        for column in 0..columns.len() {
+            let slots = columns.get(column).map_or(0, Vec::len);
+            for at in 0..slots.saturating_sub(1) {
+                let mut trial = columns.clone();
+                if let Some(slots) = trial.get_mut(column) {
+                    slots.swap(at, at + 1);
+                }
+                let placed = place::place(g, &trial, hops, interiors);
+                let key = worth(&draw(&trial, &placed));
+                if key < best {
+                    best = key;
+                    columns = trial;
+                    moved = true;
+                }
+            }
+        }
+        if !moved {
+            break;
+        }
+    }
+    columns
+}
+
+/// How many passes of adjacent swaps a graph is worth, or `None` for none.
+///
+/// A pass draws the graph once per adjacent pair in every column, which is
+/// roughly once per slot. Cheaper per trial than the placement descent, because
+/// placement is not settled for each one, and worth more: crossings are what it
+/// moves and crossings are the largest thing left.
+fn swapped(g: &Graph) -> Option<usize> {
+    match g.edges().len() {
+        0..=48 => Some(4),
+        49..=160 => Some(2),
+        _ => None,
+    }
 }
 
 /// Places one ordering, then hill-climbs the placement by drawing it.
