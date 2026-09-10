@@ -12,6 +12,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 pub mod colour;
+pub mod defect;
 pub mod drawing;
 pub mod graph;
 pub mod io;
@@ -25,6 +26,7 @@ mod layout;
 mod paint;
 mod score;
 
+pub use defect::{Defect, Fault};
 pub use drawing::{Drawing, Rect};
 pub use paint::Span;
 pub use score::Score;
@@ -136,4 +138,18 @@ pub fn draw_drawing(graph: &Graph, drawing: &Drawing, options: Options) -> Strin
 /// graph, not about the picture.
 pub fn score_drawing(graph: &Graph, drawing: &Drawing) -> Score {
     score::score(graph, drawing.layout())
+}
+
+/// Everything wrong with the drawing of a graph, and who is responsible.
+///
+/// [`score`] says how much; this says where and between which two edges, which
+/// is the difference between knowing a drawing is bad and knowing what to
+/// change. See [`Defect`].
+pub fn defects(graph: &Graph) -> Vec<Defect> {
+    defects_with(graph, Options::default())
+}
+
+/// Everything wrong with the drawing of a graph, with options.
+pub fn defects_with(graph: &Graph, options: Options) -> Vec<Defect> {
+    score::defects(graph, &layout::build(graph, options))
 }

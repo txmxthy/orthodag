@@ -163,7 +163,7 @@ fn order_tracks(runs: &[Run], tracks: &[Vec<usize>]) -> Vec<usize> {
         return (0..count).collect();
     }
 
-    let mut best: Vec<usize> = (0..count).collect();
+    let mut best: Vec<usize> = nesting(runs, tracks);
     let mut best_cost = cost(runs, tracks, &best);
 
     if count <= EXACT {
@@ -203,6 +203,37 @@ fn order_tracks(runs: &[Run], tracks: &[Vec<usize>]) -> Vec<usize> {
         }
     }
     places
+}
+
+/// The order a fan nests in: the branch that travels furthest turns first.
+///
+/// `design.md` §4.5 says the outermost branch of a fan turns first, and this is
+/// that sentence as an ordering. Two runs leaving one box at neighbouring rows
+/// and climbing to different heights do not cross when the taller one takes the
+/// nearer track — its horizontal leaves above everything the shorter one
+/// occupies — and cross once when they are the other way round.
+///
+/// It matters because it is where the search starts. Past [`EXACT`] tracks the
+/// order is hill-climbed by adjacent swaps, and a hill climb is worth about as
+/// much as the place it begins: first-fit packing order, which is what it used
+/// to begin from, says nothing about left-to-right at all.
+///
+/// Ties go to the lower track index, so the seed is the same every run.
+fn nesting(runs: &[Run], tracks: &[Vec<usize>]) -> Vec<usize> {
+    let reach = |track: usize| {
+        tracks
+            .get(track)
+            .into_iter()
+            .flatten()
+            .filter_map(|at| runs.get(*at))
+            .map(|run| run.hi() - run.lo())
+            .max()
+            .unwrap_or(0)
+    };
+
+    let mut order: Vec<usize> = (0..tracks.len()).collect();
+    order.sort_by_key(|track| (std::cmp::Reverse(reach(*track)), *track));
+    order
 }
 
 /// What one left-to-right order costs: landings first, then crossings.

@@ -402,6 +402,49 @@ impl fmt::Display for Score {
     }
 }
 
+/// Every defect in a drawing, with the cell and the pair responsible.
+///
+/// The same classification the counting uses, kept instead of tallied. One pass
+/// over the raster; a cell with three edges in it reports every pair.
+pub(crate) fn defects(g: &Graph, layout: &Layout) -> Vec<crate::defect::Defect> {
+    use crate::defect::{Defect, Fault};
+
+    let colours = crate::colour::of(g);
+    let slot = |edge: EdgeId| colours.get(edge.index()).copied().flatten();
+    let mut found = Vec::new();
+
+    for (x, y, ink) in Raster::of(layout).drawn() {
+        for (at, one) in ink.iter().enumerate() {
+            for other in &ink[at + 1..] {
+                let how = shared(g, *one, *other);
+                let parted = matches!(
+                    (slot(one.edge), slot(other.edge)),
+                    (Some(a), Some(b)) if a != b
+                );
+                let fault = match how {
+                    Shared::Crossing => Fault::Crossing,
+                    Shared::Overlap => Fault::Overlap,
+                    Shared::Fork | Shared::Join if parted => Fault::Blend,
+                    // A trunk two branches of one flow share is the shape a fan
+                    // is supposed to read as. Nothing is wrong here.
+                    Shared::Fork | Shared::Join => continue,
+                };
+                let (lo, hi) = if one.edge <= other.edge {
+                    (one.edge, other.edge)
+                } else {
+                    (other.edge, one.edge)
+                };
+                found.push(Defect {
+                    at: (x, y),
+                    fault,
+                    edges: (lo, hi),
+                });
+            }
+        }
+    }
+    found
+}
+
 /// The cells where two unrelated edges genuinely pass each other.
 ///
 /// The painter asks for these so a bridge can be drawn, and it asks *here*
