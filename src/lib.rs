@@ -113,6 +113,18 @@ pub fn score_with(graph: &Graph, options: Options) -> Score {
     score::score(graph, &layout::build(graph, options))
 }
 
+/// Paints a drawing built by the caller, with this library's glyphs.
+///
+/// The companion to [`score_drawing`]: a caller's boxes and polylines drawn by
+/// the same painter this library uses, so two drawings of one graph can be put
+/// side by side and differ only in their layout.
+///
+/// The graph supplies what goes inside the boxes; the drawing says where they
+/// are.
+pub fn draw_drawing(graph: &Graph, drawing: &Drawing, options: Options) -> String {
+    paint::draw(graph, drawing.layout(), options).to_string()
+}
+
 /// What a drawing built by the caller is worth.
 ///
 /// The same objective [`score`] applies to this library's own output, applied

@@ -300,6 +300,15 @@ pub struct Score {
     pub overlaps: usize,
     /// Cells where two edges genuinely pass each other.
     pub cross_cells: usize,
+    /// Cells where two flows of different colours meet.
+    ///
+    /// A cell holds one character and therefore one colour, so where two
+    /// colours land the painter has to drop one and the reader loses a flow.
+    /// `design.md` §4.7 calls this a defect the layout is responsible for
+    /// avoiding — it is reported rather than scored because avoiding it is the
+    /// business of ports and tracks, and charging for it here would only tell a
+    /// search to make the drawing smaller.
+    pub mixed: usize,
     /// How far a fan leans off the row it should be symmetric about.
     pub asymmetry: i64,
     /// Vertical travel beyond what the rows required, over every edge.
@@ -338,7 +347,7 @@ impl Score {
     ///
     /// One list feeding both the human line and the stored baseline, so a
     /// baseline can never describe a field the report does not show.
-    pub fn fields(&self) -> [(&'static str, i64); 12] {
+    pub fn fields(&self) -> [(&'static str, i64); 13] {
         let count = |n: usize| i64::try_from(n).unwrap_or(i64::MAX);
         [
             ("bends_fwd", count(self.bends_over_fwd)),
@@ -346,6 +355,7 @@ impl Score {
             ("junctions", count(self.junction_over)),
             ("overlaps", count(self.overlaps)),
             ("cross", count(self.cross_cells)),
+            ("mixed", count(self.mixed)),
             ("asym", self.asymmetry),
             ("detour", self.detour),
             ("jogs", count(self.jogs)),
@@ -417,6 +427,7 @@ pub(crate) fn score(g: &Graph, layout: &Layout) -> Score {
                 .any(|(at, one)| ink[at + 1..].iter().any(|o| crossing(one.bits, o.bits)))
         })
         .count();
+    let mixed = mixed(g, &raster);
     let asymmetry = asymmetry(g, layout);
     let detour: i64 = edges.iter().map(|e| i64::from(e.detour)).sum();
 
@@ -433,6 +444,7 @@ pub(crate) fn score(g: &Graph, layout: &Layout) -> Score {
         junction_over,
         overlaps,
         cross_cells,
+        mixed,
         asymmetry,
         detour,
         ink: raster.ink(),
@@ -441,6 +453,28 @@ pub(crate) fn score(g: &Graph, layout: &Layout) -> Score {
         height: layout.height,
         total,
     }
+}
+
+/// Cells where two different palette slots land on one character.
+///
+/// Colour is keyed on the tag set, so this counts places where two logical
+/// flows were drawn through the same cell and one of them lost its colour. Two
+/// edges of the same colour sharing a cell are one line to a reader and cost
+/// nothing here.
+fn mixed(g: &Graph, raster: &Raster) -> usize {
+    let colours = crate::colour::of(g);
+    let slot = |edge: EdgeId| colours.get(edge.index()).copied().flatten();
+
+    raster
+        .drawn()
+        .filter(|(_, _, ink)| {
+            ink.iter().enumerate().any(|(at, one)| {
+                ink[at + 1..].iter().any(|other| {
+                    matches!((slot(one.edge), slot(other.edge)), (Some(a), Some(b)) if a != b)
+                })
+            })
+        })
+        .count()
 }
 
 /// How far each box's fan leans off the row it should be symmetric about.
@@ -533,6 +567,38 @@ fn arriving(route: &Route) -> Option<i32> {
 
 #[cfg(test)]
 mod tests {
+    /// Two flows meeting in one cell cost a colour; two edges of one flow do not.
+    ///
+    /// A cell holds one character, so where a red run and a blue run land the
+    /// reader loses one of them. Where two runs of the *same* tag set land they
+    /// are one line as far as a reader is concerned, which is the whole point of
+    /// keying colour on the tag set, and nothing is lost.
+    #[test]
+    fn mixed_counts_colours_not_edges() {
+        use crate::graph::{Graph, Node};
+
+        let mut same = Graph::new();
+        let ids: Vec<_> = (0..3)
+            .map(|i| same.add_node(Node::new(format!("n{i}"))))
+            .collect();
+        let mut apart = same.clone();
+
+        same.add_tagged_edge(ids[0], ids[2], ["t"]);
+        same.add_tagged_edge(ids[1], ids[2], ["t"]);
+        apart.add_tagged_edge(ids[0], ids[2], ["red"]);
+        apart.add_tagged_edge(ids[1], ids[2], ["blue"]);
+
+        assert_eq!(
+            crate::score(&same).mixed,
+            0,
+            "one flow into one box cannot lose a colour"
+        );
+        assert!(
+            crate::score(&apart).mixed >= crate::score(&same).mixed,
+            "two flows can only cost more"
+        );
+    }
+
     use super::*;
     use crate::graph::{Graph, Node};
     use crate::layout;
