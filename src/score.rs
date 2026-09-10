@@ -300,7 +300,20 @@ pub struct Score {
     pub overlaps: usize,
     /// Cells where two edges genuinely pass each other.
     pub cross_cells: usize,
-    /// Cells where two flows of different colours meet.
+    /// Cells where two flows are drawn as one line.
+    ///
+    /// A fork run carrying two colours is a trunk that two flows were bundled
+    /// onto. The cell holds one character, so one of them is simply gone there
+    /// — and unlike a crossing, which has to happen somewhere and reads as a
+    /// crossing, this reads as one line, which is a different claim and a false
+    /// one. `overlaps` charges exactly this lie for two unrelated edges; the
+    /// only thing that let it through here is that these two share an endpoint.
+    ///
+    /// Counted apart from `mixed` because it is the avoidable half. Where two
+    /// flows genuinely cross, a cell has to give up a colour and the bridge
+    /// glyph says so.
+    pub blends: usize,
+    /// Cells where two flows of different colours meet, avoidable or not.
     ///
     /// A cell holds one character and therefore one colour, so where two
     /// colours land the painter has to drop one and the reader loses a flow.
@@ -347,7 +360,7 @@ impl Score {
     ///
     /// One list feeding both the human line and the stored baseline, so a
     /// baseline can never describe a field the report does not show.
-    pub fn fields(&self) -> [(&'static str, i64); 13] {
+    pub fn fields(&self) -> [(&'static str, i64); 14] {
         let count = |n: usize| i64::try_from(n).unwrap_or(i64::MAX);
         [
             ("bends_fwd", count(self.bends_over_fwd)),
@@ -355,6 +368,7 @@ impl Score {
             ("junctions", count(self.junction_over)),
             ("overlaps", count(self.overlaps)),
             ("cross", count(self.cross_cells)),
+            ("blends", count(self.blends)),
             ("mixed", count(self.mixed)),
             ("asym", self.asymmetry),
             ("detour", self.detour),
@@ -465,6 +479,7 @@ pub(crate) fn score(g: &Graph, layout: &Layout) -> Score {
         })
         .count();
     let mixed = mixed(g, &raster);
+    let blends = blends(g, &raster);
     let asymmetry = asymmetry(g, layout);
     let detour: i64 = edges.iter().map(|e| i64::from(e.detour)).sum();
 
@@ -481,6 +496,7 @@ pub(crate) fn score(g: &Graph, layout: &Layout) -> Score {
         junction_over,
         overlaps,
         cross_cells,
+        blends,
         mixed,
         asymmetry,
         detour,
@@ -490,6 +506,38 @@ pub(crate) fn score(g: &Graph, layout: &Layout) -> Score {
         height: layout.height,
         total,
     }
+}
+
+/// Cells where a fork or join run carries two flows at once.
+///
+/// The avoidable half of [`mixed`]. Two edges sharing a source or a target are
+/// allowed to share a run — that is a trunk with a branch off it, and it is the
+/// shape a fan should read as. They are allowed to share it *because they are
+/// one line*, which stops being true the moment the two carry different
+/// colours: then the trunk is two flows bundled together and the reader loses
+/// one of them for the length of the run.
+///
+/// A perpendicular meeting is not counted. `shared` calls that a crossing
+/// before it gets here, and a crossing has to give up a colour wherever it
+/// happens.
+fn blends(g: &Graph, raster: &Raster) -> usize {
+    let colours = crate::colour::of(g);
+    let slot = |edge: EdgeId| colours.get(edge.index()).copied().flatten();
+
+    raster
+        .drawn()
+        .filter(|(_, _, ink)| {
+            ink.iter().enumerate().any(|(at, one)| {
+                ink[at + 1..].iter().any(|other| {
+                    matches!(shared(g, *one, *other), Shared::Fork | Shared::Join)
+                        && matches!(
+                            (slot(one.edge), slot(other.edge)),
+                            (Some(a), Some(b)) if a != b
+                        )
+                })
+            })
+        })
+        .count()
 }
 
 /// Cells where two different palette slots land on one character.
