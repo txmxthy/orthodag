@@ -152,9 +152,16 @@ fn groups(
         } else {
             Slot::Pass(id)
         };
-        let Some(aim) = find(columns, slot)
-            .filter(|(c, _)| *c == next)
-            .map(|(c, at)| placed.middle(c, at))
+        // Looked for *in* that column, not anywhere. A long edge's placeholder
+        // carries one id down every column it passes, so asking where the slot
+        // is finds the first of them — which for an edge arriving from four
+        // columns back is nowhere near the box it is arriving at. The answer
+        // used to be discarded, and the edge with it: no entry row, and two
+        // flows landing on one.
+        let Some(aim) = columns
+            .get(next)
+            .and_then(|slots| slots.iter().position(|s| *s == slot))
+            .map(|at| placed.middle(next, at))
         else {
             continue;
         };
@@ -216,6 +223,40 @@ mod tests {
         let placed = place::place(g, &columns, &hops, &interiors(g, &acyclic));
         let ports = rows(g, &acyclic, &columns, &placed);
         (acyclic, columns, placed, ports)
+    }
+
+    /// A long edge and a short one into one box arrive on rows of their own.
+    ///
+    /// The long one's placeholder carries its id down every column it passes,
+    /// so asking where that slot is used to find the first of them — four
+    /// columns from the box it arrives at — and the answer was thrown away
+    /// along with the edge. Two flows then landed on one row and were drawn as
+    /// one line.
+    #[test]
+    fn a_long_arrival_gets_a_row_of_its_own() {
+        let mut g = Graph::new();
+        let s = g.add_node(Node::new("s"));
+        let chain: Vec<_> = (0..3)
+            .map(|i| g.add_node(Node::new(format!("c{i}"))))
+            .collect();
+        let z = g.add_node(Node::new("z"));
+
+        g.add_tagged_edge(s, chain[0], ["t1"]);
+        g.add_tagged_edge(chain[0], chain[1], ["t2"]);
+        g.add_tagged_edge(chain[1], chain[2], ["t3"]);
+        let near = g.add_tagged_edge(chain[2], z, ["t4"]);
+        let far = g.add_tagged_edge(s, z, ["x1"]);
+
+        let (_, _, _, ports) = build(&g);
+        assert!(
+            ports.entry(far).is_some(),
+            "the long arrival got no row at all"
+        );
+        assert_ne!(
+            ports.entry(near),
+            ports.entry(far),
+            "two flows arriving on one row are drawn as one line"
+        );
     }
 
     #[test]
