@@ -170,7 +170,7 @@ pub(crate) fn route(
 ) -> Layout {
     let widths = widths(g, columns, style);
     let paths = paths(g, acyclic, columns, placed, ports);
-    let runs = runs(&paths);
+    let runs = runs(&paths, &crate::colour::of(g));
     let tracks = pack(&runs, columns.len().saturating_sub(1));
 
     let captions = captions(g, &paths, style);
@@ -434,7 +434,7 @@ fn column_of(columns: &Columns, slot: Slot) -> Option<usize> {
 ///
 /// A hop that stays on its row needs none: it is drawn as one straight line and
 /// nothing has to make room for it.
-fn runs(paths: &[Path]) -> Vec<Run> {
+fn runs(paths: &[Path], colours: &[Option<crate::colour::Colour>]) -> Vec<Run> {
     let mut runs = Vec::new();
     for path in paths {
         for (step, pair) in path.rows.windows(2).enumerate() {
@@ -450,6 +450,7 @@ fn runs(paths: &[Path]) -> Vec<Run> {
                 leave: to_row,
                 from: path.slot(gap),
                 to: path.slot(gap + 1),
+                ink: colours.get(path.edge.index()).copied().flatten(),
             });
         }
     }

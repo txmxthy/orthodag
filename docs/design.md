@@ -153,9 +153,17 @@ This is a phase the classical presentation does not have.
 In the gap between two columns, every edge that changes row needs a
 vertical run. Runs are packed onto tracks, meaning vertical channels one
 column wide, by first-fit packing over their row intervals. Two runs may
-share a track when they meet at one end, since a fan out of one box should
-read as a single trunk with a branch to each target instead of a comb of
-parallel lines.
+share a track when they meet at one end and carry the same colour, since a
+fan out of one box should read as a single trunk with a branch to each
+target instead of a comb of parallel lines.
+
+Both conditions matter. Meeting at one end makes two runs eligible to merge
+into a single line; carrying the same colour is what actually merges them.
+Two different flows placed on one trunk become a line the reader cannot
+separate again, the same failure an overlap causes, and the scorer counts
+it as `blends`. Given a choice between a comb of separate runs and a trunk
+that has swallowed a flow, the comb is the better drawing: it is less tidy
+to look at, but every line in it can still be followed.
 
 Tracks are then ordered left to right by an exact search over permutations
 when the gap is small. The search first minimises horizontal segments

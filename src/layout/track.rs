@@ -10,6 +10,7 @@
 //! whether a fan reads as a trunk or as a comb.
 
 use super::layer::Slot;
+use crate::colour::Colour;
 use crate::graph::EdgeId;
 
 /// One edge changing row in one gap.
@@ -24,6 +25,8 @@ pub(crate) struct Run {
     /// What it leaves and what it arrives at, which is what may be shared.
     pub(crate) from: Slot,
     pub(crate) to: Slot,
+    /// Which flow it belongs to, or `None` where it carries no tags.
+    pub(crate) ink: Option<Colour>,
 }
 
 impl Run {
@@ -42,13 +45,23 @@ impl Run {
         self.hi() < other.lo() || other.hi() < self.lo()
     }
 
-    /// Whether they leave the same slot or arrive at the same one.
+    /// Whether they are one line: the same flow, meeting at an end.
     ///
     /// Two such runs overlapping on a track is not two lines drawn as one — it
     /// *is* one line, the trunk they share, with a branch off it. Forbidding it
     /// gives a fan a track per branch and draws it as a comb.
+    ///
+    /// The flow has to match. Sharing an end makes two runs *eligible* to be one
+    /// line; carrying the same colour is what makes them one. Two flows out of
+    /// one box put on one track are a trunk the reader cannot take apart —
+    /// `score::blends` counts exactly this — and the comb is the better of the
+    /// two pictures, because a comb can at least be followed.
+    ///
+    /// Untagged runs share a flow with each other and with nothing else: they
+    /// are all drawn in the caller's default ink, so there is no colour for a
+    /// shared trunk to lose.
     fn meets(self, other: Self) -> bool {
-        self.from == other.from || self.to == other.to
+        self.ink == other.ink && (self.from == other.from || self.to == other.to)
     }
 
     /// Whether two runs can sit on the same column of cells.
@@ -262,7 +275,13 @@ mod tests {
         Slot::Node(NodeId::from_index(id as usize))
     }
 
+    /// An untagged run. Untagged runs all share the one flow, so these keep
+    /// testing what they always tested: whether meeting at an end is enough.
     fn run(edge: u32, enter: i32, leave: i32, from: Slot, to: Slot) -> Run {
+        inked(edge, enter, leave, from, to, None)
+    }
+
+    fn inked(edge: u32, enter: i32, leave: i32, from: Slot, to: Slot, ink: Option<Colour>) -> Run {
         Run {
             edge: EdgeId::from_index(edge as usize),
             gap: 0,
@@ -270,7 +289,33 @@ mod tests {
             leave,
             from,
             to,
+            ink,
         }
+    }
+
+    /// Two flows out of one box do not share a trunk, however much they overlap.
+    ///
+    /// Meeting at an end makes two runs eligible to be one line; carrying the
+    /// same colour is what makes them one. Put two flows on a single track and
+    /// the reader cannot take the trunk apart again — a comb is worse to look at
+    /// and better to follow.
+    #[test]
+    fn two_flows_leaving_one_box_take_a_track_each() {
+        let (a, b) = (node(0), node(1));
+        let red = Some(Colour::from_slot(0));
+        let blue = Some(Colour::from_slot(1));
+
+        let same = pack(
+            &[inked(0, 0, 4, a, b, red), inked(1, 0, 6, a, node(2), red)],
+            1,
+        );
+        assert_eq!(same.of(0), same.of(1), "one flow, one trunk");
+
+        let apart = pack(
+            &[inked(0, 0, 4, a, b, red), inked(1, 0, 6, a, node(2), blue)],
+            1,
+        );
+        assert_ne!(apart.of(0), apart.of(1), "two flows, two tracks");
     }
 
     #[test]

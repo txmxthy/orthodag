@@ -28,7 +28,7 @@ Run `cargo run --example score` to print every fixture, worst first.
 |---|---|---|
 | Vocabulary | `bends_fwd`, `bends_skip`, `junctions`, `overlaps` | Reach zero and remain there |
 | Soft | `cross`, `asym`, `detour` | Reduce the aggregate cost |
-| Reported | `jogs`, `ink`, `width`, `height` | Useful for investigating changes; not part of the search objective |
+| Reported | `blends`, `mixed`, `jogs`, `ink`, `width`, `height` | Useful for investigating changes; not part of the search objective |
 
 `total` is:
 
