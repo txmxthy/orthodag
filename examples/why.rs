@@ -54,7 +54,7 @@ fn report(g: &Graph) {
         )
     };
 
-    let mut pairs: BTreeMap<(String, String, String), usize> = BTreeMap::new();
+    let mut pairs: BTreeMap<(String, String, String), Vec<(i32, i32)>> = BTreeMap::new();
     for defect in orthodag::defects(g) {
         let blame = if defect.same_source(g).is_some() {
             "a fan out of one box crosses itself"
@@ -63,13 +63,14 @@ fn report(g: &Graph) {
         } else {
             "two unrelated edges"
         };
-        *pairs
+        pairs
             .entry((
                 format!("{:?} — {blame}", defect.fault),
                 label(defect.edges.0),
                 label(defect.edges.1),
             ))
-            .or_default() += 1;
+            .or_default()
+            .push(defect.at);
     }
 
     if pairs.is_empty() {
@@ -78,8 +79,13 @@ fn report(g: &Graph) {
     }
 
     let mut rows: Vec<_> = pairs.into_iter().collect();
-    rows.sort_by_key(|(_, cells)| std::cmp::Reverse(*cells));
+    rows.sort_by_key(|(_, cells)| std::cmp::Reverse(cells.len()));
     for ((fault, a, b), cells) in rows {
-        println!("{cells:>3} cells  {fault}\n            {a}\n            {b}");
+        let at: Vec<String> = cells.iter().map(|(x, y)| format!("{x},{y}")).collect();
+        println!(
+            "{:>3} cells  {fault}\n            {a}\n            {b}\n            at {}",
+            cells.len(),
+            at.join(" ")
+        );
     }
 }
