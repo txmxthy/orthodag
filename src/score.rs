@@ -163,12 +163,26 @@ pub(crate) fn per_edge(g: &Graph, layout: &Layout, raster: &Raster) -> Vec<EdgeS
     let mut forks: Vec<Vec<(i32, i32)>> = vec![Vec::new(); scores.len()];
     let mut joins: Vec<Vec<(i32, i32)>> = vec![Vec::new(); scores.len()];
 
+    // Which entry of `scores` an edge is, by its id. The loop below asks once
+    // per edge per shared cell, and asking by search made the tally cost an edge
+    // scan a question — quadratic in the edges, on exactly the busiest cells.
+    let mut held_at = vec![usize::MAX; g.edges().len()];
+    for (at, score) in scores.iter().enumerate() {
+        if let Some(slot) = held_at.get_mut(score.edge.index()) {
+            *slot = at;
+        }
+    }
+
     for (x, y, ink) in raster.drawn() {
         for (at, one) in ink.iter().enumerate() {
             for other in &ink[at + 1..] {
                 let how = shared(g, *one, *other);
                 for held in [one.edge, other.edge] {
-                    let Some(index) = scores.iter().position(|s| s.edge == held) else {
+                    let Some(index) = held_at
+                        .get(held.index())
+                        .copied()
+                        .filter(|at| *at != usize::MAX)
+                    else {
                         continue;
                     };
                     match how {
@@ -224,18 +238,34 @@ fn crossing(one: u8, other: u8) -> bool {
 /// merge onto its target's — and a second of either means the line is being
 /// read as part of something it is not.
 fn runs(cells: &[(i32, i32)]) -> usize {
-    let mut left: Vec<(i32, i32)> = cells.to_vec();
-    left.sort_unstable();
-    left.dedup();
+    let mut held: Vec<(i32, i32)> = cells.to_vec();
+    held.sort_unstable();
+    held.dedup();
+
+    // Sorted, so a neighbour is a binary search, and visited is a flag rather
+    // than a removal — looking one up by scanning and taking it out by shifting
+    // the rest made counting a fan's trunk quadratic in its length, and a trunk
+    // is exactly the long thing here.
+    let mut taken = vec![false; held.len()];
+    let mut frontier: Vec<(i32, i32)> = Vec::new();
     let mut found = 0;
 
-    while let Some(seed) = left.pop() {
+    for start in 0..held.len() {
+        if taken.get(start) != Some(&false) {
+            continue;
+        }
         found += 1;
-        let mut frontier = vec![seed];
+        if let Some(seed) = held.get(start).copied() {
+            taken[start] = true;
+            frontier.push(seed);
+        }
         while let Some((x, y)) = frontier.pop() {
             for next in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] {
-                if let Some(at) = left.iter().position(|c| *c == next) {
-                    frontier.push(left.remove(at));
+                if let Ok(at) = held.binary_search(&next)
+                    && taken.get(at) == Some(&false)
+                {
+                    taken[at] = true;
+                    frontier.push(next);
                 }
             }
         }
@@ -513,16 +543,7 @@ pub(crate) fn score(g: &Graph, layout: &Layout) -> Score {
     let junction_over = over(|e| e.forks > 1 || e.joins > 1);
     let overlaps = edges.iter().map(|e| e.overlaps).sum::<usize>();
 
-    let cross_cells = raster
-        .drawn()
-        .filter(|(_, _, ink)| {
-            ink.iter()
-                .enumerate()
-                .any(|(at, one)| ink[at + 1..].iter().any(|o| crossing(one.bits, o.bits)))
-        })
-        .count();
-    let mixed = mixed(g, &raster);
-    let blends = blends(g, &raster);
+    let (cross_cells, blends, mixed) = shared_cells(g, &raster);
     let asymmetry = asymmetry(g, layout);
     let detour: i64 = edges.iter().map(|e| i64::from(e.detour)).sum();
 
@@ -551,60 +572,37 @@ pub(crate) fn score(g: &Graph, layout: &Layout) -> Score {
     }
 }
 
-/// Cells where a fork or join run carries two flows at once.
+/// The three things a cell can be guilty of, counted in one walk.
 ///
-/// The avoidable half of [`mixed`]. Two edges sharing a source or a target are
-/// allowed to share a run — that is a trunk with a branch off it, and it is the
-/// shape a fan should read as. They are allowed to share it *because they are
-/// one line*, which stops being true the moment the two carry different
-/// colours: then the trunk is two flows bundled together and the reader loses
-/// one of them for the length of the run.
-///
-/// A perpendicular meeting is not counted. `shared` calls that a crossing
-/// before it gets here, and a crossing has to give up a colour wherever it
-/// happens.
-fn blends(g: &Graph, raster: &Raster) -> usize {
+/// Each is a question about one cell — does anything cross here, is a trunk
+/// carrying two flows, did any two inks meet — and each used to be asked in a
+/// pass of its own over every cell of the drawing. The drawing is scored
+/// hundreds of times per graph and the walk is the width times the height
+/// whether or not anything was drawn, so asking all three at once is three
+/// walks saved out of four.
+fn shared_cells(g: &Graph, raster: &Raster) -> (usize, usize, usize) {
     let colours = crate::colour::of(g);
     let slot = |edge: EdgeId| colours.get(edge.index()).copied().flatten();
+    let (mut crossed, mut blended, mut mixed) = (0, 0, 0);
 
-    raster
-        .drawn()
-        .filter(|(_, _, ink)| {
-            ink.iter().enumerate().any(|(at, one)| {
-                ink[at + 1..].iter().any(|other| {
-                    matches!(shared(g, *one, *other), Shared::Fork | Shared::Join)
-                        && slot(one.edge) != slot(other.edge)
-                })
-            })
-        })
-        .count()
-}
-
-/// Cells where two different inks land on one character.
-///
-/// Colour is keyed on the tag set, so this counts places where two logical
-/// flows were drawn through the same cell and one of them lost its ink. Two
-/// edges of the same colour sharing a cell are one line to a reader and cost
-/// nothing here.
-///
-/// An untagged edge counts as its own ink rather than as no ink at all. It is
-/// drawn in whatever the caller uses for default, which is a colour on the
-/// screen whatever the library calls it, and a coloured run crossing a default
-/// one loses exactly as much as two coloured runs do.
-fn mixed(g: &Graph, raster: &Raster) -> usize {
-    let colours = crate::colour::of(g);
-    let slot = |edge: EdgeId| colours.get(edge.index()).copied().flatten();
-
-    raster
-        .drawn()
-        .filter(|(_, _, ink)| {
-            ink.iter().enumerate().any(|(at, one)| {
-                ink[at + 1..]
-                    .iter()
-                    .any(|other| slot(one.edge) != slot(other.edge))
-            })
-        })
-        .count()
+    for (_, _, ink) in raster.drawn() {
+        let (mut is_crossed, mut is_blend, mut is_mixed) = (false, false, false);
+        for (at, one) in ink.iter().enumerate() {
+            for other in &ink[at + 1..] {
+                let parted = slot(one.edge) != slot(other.edge);
+                if crossing(one.bits, other.bits) {
+                    is_crossed = true;
+                } else if parted && matches!(shared(g, *one, *other), Shared::Fork | Shared::Join) {
+                    is_blend = true;
+                }
+                is_mixed |= parted;
+            }
+        }
+        crossed += usize::from(is_crossed);
+        blended += usize::from(is_blend);
+        mixed += usize::from(is_mixed);
+    }
+    (crossed, blended, mixed)
 }
 
 /// How far each box's fan leans off the row it should be symmetric about.
