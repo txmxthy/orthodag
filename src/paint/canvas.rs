@@ -160,6 +160,21 @@ impl Canvas {
             return;
         }
         let (right, bottom) = (x + w - 1, y + h - 1);
+
+        // A box is opaque. An edge that ends up running under one is hidden by
+        // it — `design.md` §4.7 — so that the defect reads as a line that stops
+        // rather than a box with a line through it, and so that a border cell a
+        // route happens to cross stays the colour of the box rather than taking
+        // the colour of whatever passed beneath.
+        for step in y..=bottom {
+            for across in x..=right {
+                if let Some(at) = self.at(across, step) {
+                    self.over[at] = Some(' ');
+                    self.ink[at] = Ink::Blank;
+                }
+            }
+        }
+
         for step in x + 1..right {
             self.put(step, y, '─');
             self.put(step, bottom, '─');

@@ -260,6 +260,40 @@ mod tests {
         );
     }
 
+    /// A box hides what runs under it.
+    ///
+    /// A route beneath a box is a defect, and the drawing says so by stopping
+    /// the line at the box rather than running it through — otherwise a reader
+    /// follows a line somewhere it does not go. `design.md` §4.7.
+    #[test]
+    fn a_box_hides_what_runs_under_it() {
+        let mut g = Graph::new();
+        let ids: Vec<_> = ["a", "b", "o"]
+            .iter()
+            .map(|n| g.add_node(Node::new(*n)))
+            .collect();
+        let beneath = g.add_tagged_edge(ids[0], ids[1], ["t"]);
+
+        let mut drawing = Drawing::new(9, 7);
+        drawing.boxed(ids[2], 0, Rect::new(2, 1, 5, 5));
+        // Straight down the middle: in at the top of the box, out at the bottom.
+        drawing.route(beneath, [(4, 0), (4, 6)]);
+
+        let art = crate::draw_drawing(&g, &drawing, Options::default());
+        let rows: Vec<Vec<char>> = art.lines().map(|row| row.chars().collect()).collect();
+        let across = |row: usize| -> String {
+            rows.get(row)
+                .map(|row| row.iter().skip(2).take(5).collect())
+                .unwrap_or_default()
+        };
+
+        assert_eq!(across(1), "┌───┐", "the top border:\n{art}");
+        assert_eq!(across(2), "│ o │", "the line shows through:\n{art}");
+        assert_eq!(across(3), "│   │", "the line shows through:\n{art}");
+        assert_eq!(across(5), "└───┘", "the bottom border:\n{art}");
+        assert!(art.starts_with("    │"), "it should still arrive:\n{art}");
+    }
+
     /// A cell outside the frame is dropped rather than panicking. A caller's
     /// drawing is not trusted input.
     #[test]
