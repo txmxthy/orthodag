@@ -220,7 +220,13 @@ mod tests {
         let layered = layer::layer(g, &adj, &acyclic, &ranked);
         let hops = order::Hops::of(&layered);
         let columns = layered.all().to_vec();
-        let placed = place::place(g, &columns, &hops, &interiors(g, &acyclic));
+        let placed = place::place(
+            g,
+            &columns,
+            &hops,
+            &interiors(g, &acyclic),
+            place::Merge::Flows,
+        );
         let ports = rows(g, &acyclic, &columns, &placed);
         (acyclic, columns, placed, ports)
     }

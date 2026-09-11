@@ -103,10 +103,17 @@ fn build_at(g: &Graph, style: route::Style) -> route::Layout {
         (score.vocabulary().iter().sum::<usize>(), score.total)
     };
 
+    let judge = Judge {
+        g,
+        hops: &hops,
+        interiors: &interiors,
+        draw: &draw,
+        worth: &worth,
+    };
+
     let mut best: Option<((usize, i64), order::Columns)> = None;
     for columns in order::orderings(&layered).iter().take(drawn(g)) {
-        let placed = settle(g, columns, &hops, &interiors, &draw, &worth);
-        let key = worth(&draw(columns, &placed));
+        let key = judge.worth_of(columns, &lay(&judge, columns));
         if best.as_ref().is_none_or(|(held, _)| key < *held) {
             best = Some((key, columns.clone()));
         }
@@ -115,9 +122,59 @@ fn build_at(g: &Graph, style: route::Style) -> route::Layout {
         return route::Layout::default();
     };
 
-    let columns = shuffle(g, &columns, &hops, &interiors, &draw, &worth);
-    let placed = settle(g, &columns, &hops, &interiors, &draw, &worth);
+    let columns = shuffle(&judge, &columns);
+    let placed = lay(&judge, &columns);
     draw(&columns, &placed)
+}
+
+/// Everything a search needs to try a drawing and put a price on it.
+///
+/// The phases stay pure functions of explicit inputs; this is the handful of
+/// them that every step of every search needs, gathered so the signatures say
+/// what varies rather than repeating what does not. Nothing here is mutable and
+/// nothing accumulates: it is the graph, the two phases already computed, and
+/// the two closures that make a drawing and price it.
+struct Judge<'a> {
+    g: &'a Graph,
+    hops: &'a order::Hops<'a>,
+    interiors: &'a [usize],
+    draw: &'a dyn Fn(&order::Columns, &place::Placed) -> route::Layout,
+    worth: &'a dyn Fn(&route::Layout) -> (usize, i64),
+}
+
+impl Judge<'_> {
+    /// What the drawing of this placement is worth.
+    fn worth_of(&self, columns: &order::Columns, placed: &place::Placed) -> (usize, i64) {
+        (self.worth)(&(self.draw)(columns, placed))
+    }
+}
+
+/// Places one ordering, merging the flows that can be merged.
+///
+/// Two long edges of one flow into one box are one line — `design.md` §3 — and
+/// they get one row between them. On a dense graph that is not always possible:
+/// holding two chains to a single row can leave a third with nowhere legal, and
+/// an edge drawn on top of an unrelated one is categorical, which no tidiness
+/// buys back.
+///
+/// So merging is optimistic. The drawing is laid with the flows merged, and only
+/// if that left a categorical defect is it laid again with every chain apart —
+/// which always has an answer — and the better of the two kept. The second
+/// attempt costs nothing on a drawing that came out clean, which is nearly all
+/// of them.
+fn lay(judge: &Judge, columns: &order::Columns) -> place::Placed {
+    let merged = settle(judge, columns, place::Merge::Flows);
+    let key = judge.worth_of(columns, &merged);
+    if key.0 == 0 {
+        return merged;
+    }
+
+    let apart = settle(judge, columns, place::Merge::Apart);
+    if judge.worth_of(columns, &apart) < key {
+        apart
+    } else {
+        merged
+    }
 }
 
 /// Swaps neighbours in a column while that makes the drawing better.
@@ -135,20 +192,12 @@ fn build_at(g: &Graph, style: route::Style) -> route::Layout {
 /// Placement is left to its plain sweeps here rather than its own descent —
 /// this is asking which order reads better, and settling every trial first
 /// would multiply two searches together for an answer neither of them changes.
-fn shuffle(
-    g: &Graph,
-    from: &order::Columns,
-    hops: &order::Hops,
-    interiors: &[usize],
-    draw: &impl Fn(&order::Columns, &place::Placed) -> route::Layout,
-    worth: &impl Fn(&route::Layout) -> (usize, i64),
-) -> order::Columns {
+fn shuffle(judge: &Judge, from: &order::Columns) -> order::Columns {
     let mut columns = from.clone();
-    let Some(passes) = swapped(g) else {
+    let Some(passes) = swapped(judge.g) else {
         return columns;
     };
-    let placed = place::place(g, &columns, hops, interiors);
-    let mut best = worth(&draw(&columns, &placed));
+    let mut best = judge.worth_of(&columns, &tried(judge, &columns));
 
     for _ in 0..passes {
         let mut moved = false;
@@ -159,8 +208,7 @@ fn shuffle(
                 if let Some(slots) = trial.get_mut(column) {
                     slots.swap(at, at + 1);
                 }
-                let placed = place::place(g, &trial, hops, interiors);
-                let key = worth(&draw(&trial, &placed));
+                let key = judge.worth_of(&trial, &tried(judge, &trial));
                 if key < best {
                     best = key;
                     columns = trial;
@@ -173,6 +221,28 @@ fn shuffle(
         }
     }
     columns
+}
+
+/// One ordering laid without settling it, merged where merging comes out clean.
+///
+/// The swap search asks which *order* reads better, so it does not settle each
+/// trial — but it does have to lay them the way the winner will be laid, or it
+/// chooses an order that suits a drawing nobody is going to make.
+fn tried(judge: &Judge, columns: &order::Columns) -> place::Placed {
+    let Judge {
+        g, hops, interiors, ..
+    } = *judge;
+    let merged = place::place(g, columns, hops, interiors, place::Merge::Flows);
+    let key = judge.worth_of(columns, &merged);
+    if key.0 == 0 {
+        return merged;
+    }
+    let apart = place::place(g, columns, hops, interiors, place::Merge::Apart);
+    if judge.worth_of(columns, &apart) < key {
+        apart
+    } else {
+        merged
+    }
 }
 
 /// How many passes of adjacent swaps a graph is worth, or `None` for none.
@@ -198,26 +268,22 @@ fn swapped(g: &Graph) -> Option<usize> {
 ///
 /// Passes stop early when a whole sweep of the columns changes nothing, which
 /// is what a local minimum looks like from here.
-fn settle(
-    g: &Graph,
-    columns: &order::Columns,
-    hops: &order::Hops,
-    interiors: &[usize],
-    draw: &impl Fn(&order::Columns, &place::Placed) -> route::Layout,
-    worth: &impl Fn(&route::Layout) -> (usize, i64),
-) -> place::Placed {
-    let mut placed = place::place(g, columns, hops, interiors);
+fn settle(judge: &Judge, columns: &order::Columns, merge: place::Merge) -> place::Placed {
+    let Judge {
+        g, hops, interiors, ..
+    } = *judge;
+    let mut placed = place::place(g, columns, hops, interiors, merge);
+    let mut best = judge.worth_of(columns, &placed);
     let Some(passes) = climbed(g) else {
         return placed;
     };
-    let mut best = worth(&draw(columns, &placed));
 
     for _ in 0..passes {
         let mut moved = false;
         for column in 0..columns.len() {
             for delta in OFFERS {
-                let trial = place::nudge(g, columns, &placed, column, delta);
-                let key = worth(&draw(columns, &trial));
+                let trial = place::nudge(g, columns, &placed, column, delta, merge);
+                let key = judge.worth_of(columns, &trial);
                 if key < best {
                     best = key;
                     placed = trial;
@@ -229,6 +295,7 @@ fn settle(
             break;
         }
     }
+
     placed
 }
 

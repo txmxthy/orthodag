@@ -87,7 +87,27 @@ fn node_height(g: &Graph, interiors: &[usize], slot: Slot) -> i32 {
 }
 
 /// Places every slot, sweeping medians until the budget runs out.
-pub(crate) fn place(g: &Graph, columns: &Columns, hops: &Hops, interiors: &[usize]) -> Placed {
+/// Whether two long edges of one flow into one box share a row.
+///
+/// Merging is what `design.md` §3 asks for and it is not always possible: on a
+/// dense graph, forcing two chains onto one row can leave a third nowhere legal
+/// to go, and an edge drawn on top of an unrelated one is a categorical defect
+/// that no tidiness buys back. So it is offered and the drawing decides.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Merge {
+    /// One flow into one box, one row.
+    Flows,
+    /// Every chain its own row, which always has an answer.
+    Apart,
+}
+
+pub(crate) fn place(
+    g: &Graph,
+    columns: &Columns,
+    hops: &Hops,
+    interiors: &[usize],
+    merge: Merge,
+) -> Placed {
     let heights: Vec<Vec<i32>> = columns
         .iter()
         .map(|c| c.iter().map(|s| node_height(g, interiors, *s)).collect())
@@ -115,7 +135,7 @@ pub(crate) fn place(g: &Graph, columns: &Columns, hops: &Hops, interiors: &[usiz
     }
 
     normalise(&mut placed);
-    straighten(g, columns, &mut placed);
+    straighten(g, columns, &mut placed, merge);
     normalise(&mut placed);
     placed
 }
@@ -133,12 +153,21 @@ pub(crate) fn place(g: &Graph, columns: &Columns, hops: &Hops, interiors: &[usiz
 /// other; what changes is where they sit relative to the columns either side.
 /// The placeholders are laid again afterwards, since the rows they were
 /// straightened onto were chosen around the boxes that just moved.
+/// The same placement with the long edges laid again the other way.
+pub(crate) fn relaid(g: &Graph, columns: &Columns, placed: &Placed, merge: Merge) -> Placed {
+    let mut moved = placed.clone();
+    straighten(g, columns, &mut moved, merge);
+    normalise(&mut moved);
+    moved
+}
+
 pub(crate) fn nudge(
     g: &Graph,
     columns: &Columns,
     placed: &Placed,
     column: usize,
     delta: i32,
+    merge: Merge,
 ) -> Placed {
     let mut moved = placed.clone();
     if let (Some(slots), Some(tops)) = (columns.get(column), moved.tops.get_mut(column)) {
@@ -151,7 +180,7 @@ pub(crate) fn nudge(
         }
     }
     normalise(&mut moved);
-    straighten(g, columns, &mut moved);
+    straighten(g, columns, &mut moved, merge);
     normalise(&mut moved);
     moved
 }
@@ -170,8 +199,11 @@ pub(crate) fn nudge(
 ///
 /// Rows are handed out longest chain first, because a chain crossing six
 /// columns has the least freedom and should not be left with what is left.
-fn straighten(g: &Graph, columns: &Columns, placed: &mut Placed) {
-    let mut chains = flows(g, columns);
+fn straighten(g: &Graph, columns: &Columns, placed: &mut Placed, merge: Merge) {
+    let mut chains = match merge {
+        Merge::Flows => flows(g, columns),
+        Merge::Apart => chains(columns),
+    };
     chains.sort_by_key(|(edge, cells)| (std::cmp::Reverse(cells.len()), *edge));
 
     // One row of slack per chain is enough for every chain to find a row of its
@@ -505,7 +537,7 @@ mod tests {
         let layered = layer(&g, &adj, &acyclic, &ranked);
         let hops = Hops::of(&layered);
         let columns = layered.all().to_vec();
-        let placed = place(&g, &columns, &hops, &[]);
+        let placed = place(&g, &columns, &hops, &[], Merge::Flows);
         Case {
             g,
             ids,
@@ -621,7 +653,7 @@ mod tests {
         let ranked = rank(&g, &adj, &acyclic);
         let layered = layer(&g, &adj, &acyclic, &ranked);
         let columns = layered.all().to_vec();
-        let placed = place(&g, &columns, &Hops::of(&layered), &[]);
+        let placed = place(&g, &columns, &Hops::of(&layered), &[], Merge::Flows);
 
         assert_eq!(placed.height_of(0, 0), 3);
         assert_eq!(placed.height_of(1, 0), 5);
@@ -710,6 +742,7 @@ mod tests {
             &columns,
             &order::Hops::of(&layered),
             &super::super::port::interiors(&g, &acyclic),
+            Merge::Flows,
         );
 
         let mut rows: Vec<(usize, i32)> = Vec::new();
@@ -775,7 +808,7 @@ mod tests {
         let hops = Hops::of(&layered);
 
         for columns in order::orderings(&layered) {
-            assert!(place(&g, &columns, &hops, &[]).height() > 0);
+            assert!(place(&g, &columns, &hops, &[], Merge::Flows).height() > 0);
         }
     }
 }
