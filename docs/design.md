@@ -206,12 +206,15 @@ colour, and the painter has no way to fix that afterward. Where a genuine
 crossing makes an overlap unavoidable, the horizontal run breaks for one
 cell on either side so the vertical run reads as passing over it.
 
-This break is the default behaviour, and colour decides when it applies. A
-junction glyph asserts that two runs are one line, which is true when they
-share a colour and false, invisibly, when they do not, since the cell can
-only show one of the two colours. A crossing between two different flows
-therefore breaks; a crossing within one flow keeps its `┼`. A caller who
-wants one behaviour or the other at every crossing can still request it.
+This break is the default behaviour, and ink decides when it applies rather
+than colour on its own. A junction glyph asserts that two runs are one
+line, which is true when they share an ink and false, invisibly, when they
+do not, since the cell can only show one of the two. An untagged edge
+counts as an ink of its own, drawn in whichever default colour the caller
+uses, so a coloured run crossing a default one loses exactly as much as two
+differently coloured runs would. A crossing between two flows therefore
+breaks; a crossing within one flow keeps its `┼`. A caller who wants one
+behaviour or the other at every crossing can still request it.
 
 ### 4.8 Width fitting
 

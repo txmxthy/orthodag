@@ -417,10 +417,7 @@ pub(crate) fn defects(g: &Graph, layout: &Layout) -> Vec<crate::defect::Defect> 
         for (at, one) in ink.iter().enumerate() {
             for other in &ink[at + 1..] {
                 let how = shared(g, *one, *other);
-                let parted = matches!(
-                    (slot(one.edge), slot(other.edge)),
-                    (Some(a), Some(b)) if a != b
-                );
+                let parted = slot(one.edge) != slot(other.edge);
                 let fault = match how {
                     Shared::Crossing => Fault::Crossing,
                     Shared::Overlap => Fault::Overlap,
@@ -476,11 +473,7 @@ fn cells_where_crossing(g: &Graph, layout: &Layout, parted: bool) -> Vec<(i32, i
         .filter(|(_, _, ink)| {
             ink.iter().enumerate().any(|(at, one)| {
                 ink[at + 1..].iter().any(|other| {
-                    crossing(one.bits, other.bits)
-                        && matches!(
-                            (slot(one.edge), slot(other.edge)),
-                            (Some(a), Some(b)) if a != b
-                        )
+                    crossing(one.bits, other.bits) && slot(one.edge) != slot(other.edge)
                 })
             })
         })
@@ -573,22 +566,24 @@ fn blends(g: &Graph, raster: &Raster) -> usize {
             ink.iter().enumerate().any(|(at, one)| {
                 ink[at + 1..].iter().any(|other| {
                     matches!(shared(g, *one, *other), Shared::Fork | Shared::Join)
-                        && matches!(
-                            (slot(one.edge), slot(other.edge)),
-                            (Some(a), Some(b)) if a != b
-                        )
+                        && slot(one.edge) != slot(other.edge)
                 })
             })
         })
         .count()
 }
 
-/// Cells where two different palette slots land on one character.
+/// Cells where two different inks land on one character.
 ///
 /// Colour is keyed on the tag set, so this counts places where two logical
-/// flows were drawn through the same cell and one of them lost its colour. Two
+/// flows were drawn through the same cell and one of them lost its ink. Two
 /// edges of the same colour sharing a cell are one line to a reader and cost
 /// nothing here.
+///
+/// An untagged edge counts as its own ink rather than as no ink at all. It is
+/// drawn in whatever the caller uses for default, which is a colour on the
+/// screen whatever the library calls it, and a coloured run crossing a default
+/// one loses exactly as much as two coloured runs do.
 fn mixed(g: &Graph, raster: &Raster) -> usize {
     let colours = crate::colour::of(g);
     let slot = |edge: EdgeId| colours.get(edge.index()).copied().flatten();
@@ -597,9 +592,9 @@ fn mixed(g: &Graph, raster: &Raster) -> usize {
         .drawn()
         .filter(|(_, _, ink)| {
             ink.iter().enumerate().any(|(at, one)| {
-                ink[at + 1..].iter().any(|other| {
-                    matches!((slot(one.edge), slot(other.edge)), (Some(a), Some(b)) if a != b)
-                })
+                ink[at + 1..]
+                    .iter()
+                    .any(|other| slot(one.edge) != slot(other.edge))
             })
         })
         .count()
