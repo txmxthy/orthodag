@@ -6,6 +6,8 @@
 
 #![allow(dead_code, clippy::unwrap_used)]
 
+pub mod progress;
+
 use orthodag::{Graph, Node};
 
 /// Every fixture, in a fixed order.

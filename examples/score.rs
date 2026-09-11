@@ -29,10 +29,17 @@ fn main() {
         graphs.extend(common::corpus());
     }
 
+    // Recording is the machine path: its output is compared against a stored
+    // baseline, and a time is different every run.
+    let mut watch = common::progress::Progress::new(graphs.len(), record);
     let mut scored: Vec<_> = graphs
         .into_iter()
-        .map(|(name, g)| (name, orthodag::score(&g)))
+        .map(|(name, g)| {
+            let score = watch.graph(&name, || orthodag::score(&g));
+            (name, score)
+        })
         .collect();
+    watch.finish();
     scored.sort_by(|a, b| (b.1.total, &a.0).cmp(&(a.1.total, &b.0)));
     let widest = scored
         .iter()

@@ -21,6 +21,14 @@ corpus:
 score *flags="":
     cargo run -q --example score -- {{flags}}
 
+# how long each graph takes to lay out, worst last
+#
+# Release, because a debug build is an order of magnitude slower and says
+# nothing about the real cost. The scores go to /dev/null: the timings are on
+# stderr, so a caller can keep either half on its own.
+bench *flags="--wide":
+    @cargo run -q --release --features mermaid --example score -- {{flags}} > /dev/null
+
 # every graph on one page, to be looked at (does not open a browser)
 gallery *flags="":
     cargo run -q --features mermaid --example gallery -- {{flags}}

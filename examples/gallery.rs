@@ -62,8 +62,15 @@ fn page(graphs: &[(String, Graph)]) -> String {
     let mut nav = String::new();
     let mut main = String::new();
 
+    // The whole of a graph's work, not just its score: every tab is a layout of
+    // its own, and four of them is where the time goes.
+    let mut watch = common::progress::Progress::new(graphs.len(), false);
     for (at, (name, g)) in graphs.iter().enumerate() {
-        let score = orthodag::score(g);
+        let (score, body) = watch.graph(name, || {
+            let score = orthodag::score(g);
+            let body = section(at, name, g, &score);
+            (score, body)
+        });
         let _ = write!(
             nav,
             "<a data-at=\"{at}\" data-score=\"{}\" data-name=\"{}\">{}<b>{}</b></a>",
@@ -72,8 +79,9 @@ fn page(graphs: &[(String, Graph)]) -> String {
             escape(name),
             score.total
         );
-        let _ = write!(main, "{}", section(at, name, g, &score));
+        let _ = write!(main, "{body}");
     }
+    watch.finish();
 
     format!(
         "<!doctype html><meta charset=\"utf-8\"><title>orthodag</title>\n\
