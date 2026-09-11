@@ -579,14 +579,36 @@ pub(crate) struct Crossed {
     pub(crate) down: Option<crate::colour::Colour>,
 }
 
-/// The crossing cells where the two runs are different colours.
+/// The crossing cells where the two runs are not one line.
 ///
-/// A junction glyph says "these are one line"; where the two runs belong to
-/// different flows that is a lie, and the cell can only hold one of the two
-/// colours anyway. Where they are the same colour there is nothing to tell
-/// apart and the junction is the honest glyph.
+/// A junction glyph says "these are one line". That is true of two runs of one
+/// flow meeting at a box they share, and false of everything else — of two
+/// colours, obviously, and just as much of two edges that happen to carry the
+/// same tags and have nothing else to do with each other. Same colour is not the
+/// same line, and a reader following one of them through a `┼` has no way to
+/// know which way it went.
 pub(crate) fn parted_crossing_cells(g: &Graph, layout: &Layout) -> Vec<Crossed> {
     cells_where_crossing(g, layout, true)
+}
+
+/// Whether two edges are one line: one flow, meeting at a box they share.
+///
+/// Sharing an end is what makes two runs a trunk and a branch rather than two
+/// strangers; carrying one colour is what makes that trunk readable. Both, or
+/// they are two lines and a junction between them is a lie.
+fn one_line(
+    g: &Graph,
+    slot: &impl Fn(EdgeId) -> Option<crate::colour::Colour>,
+    one: EdgeId,
+    other: EdgeId,
+) -> bool {
+    if slot(one) != slot(other) {
+        return false;
+    }
+    let (Some(a), Some(b)) = (g.edge(one), g.edge(other)) else {
+        return false;
+    };
+    a.from() == b.from() || a.to() == b.to()
 }
 
 fn cells_where_crossing(g: &Graph, layout: &Layout, parted: bool) -> Vec<Crossed> {
@@ -599,7 +621,7 @@ fn cells_where_crossing(g: &Graph, layout: &Layout, parted: bool) -> Vec<Crossed
             let crossed = ink.iter().enumerate().any(|(at, one)| {
                 ink[at + 1..].iter().any(|other| {
                     crossing(one.bits, other.bits)
-                        && (!parted || slot(one.edge) != slot(other.edge))
+                        && (!parted || !one_line(g, &slot, one.edge, other.edge))
                 })
             });
             if !crossed {
