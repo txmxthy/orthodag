@@ -7,8 +7,8 @@ mod canvas;
 mod glyph;
 pub(crate) mod grid;
 
-pub use canvas::Span;
 pub(crate) use canvas::{Canvas, Heading};
+pub use canvas::{Part, Span};
 
 use crate::colour;
 use crate::graph::Graph;

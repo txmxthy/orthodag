@@ -54,13 +54,32 @@ enum Ink {
     Mixed,
 }
 
-/// A run of cells that share a colour.
+/// What a span is part of.
+///
+/// A box border and an edge carrying no tags both have no palette slot, and a
+/// caller that cannot tell them apart has to draw them the same — which is
+/// wrong twice over, because the furniture of a drawing and a line through it
+/// are not the same kind of thing and a reader reads them differently.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Part {
+    /// A box, the text in it, or the space around it.
+    Frame,
+    /// An edge: a run of line, an arrowhead, or a tag written on one.
+    Flow,
+}
+
+/// A run of cells that share a colour and a part.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Span {
     /// The characters.
     pub text: String,
-    /// The palette slot, or `None` where the caller should use its default ink.
+    /// The palette slot, or `None` for a flow with no tags.
+    ///
+    /// `None` on a [`Part::Frame`] span says nothing at all: the furniture has
+    /// no flow to belong to.
     pub colour: Option<Colour>,
+    /// Whether this is the drawing or a line through it.
+    pub part: Part,
 }
 
 /// A drawing, one character per cell.
@@ -220,6 +239,19 @@ impl Canvas {
     /// a cell two colours met in — the caller gets `None` and paints its
     /// default, which is the honest thing to show for a cell that cannot say
     /// which flow it belongs to.
+    /// Whether a cell belongs to an edge or to the drawing around it.
+    ///
+    /// An edge is exactly what was stained when it was painted, which is every
+    /// run of line, every arrowhead and every tag written on one. A border, the
+    /// text in a box and the blanks between them were never stained, because
+    /// none of them belongs to a flow.
+    fn part_at(&self, x: i32, y: i32) -> Part {
+        match self.at(x, y).map(|at| self.ink[at]) {
+            Some(Ink::One(_) | Ink::Mixed) => Part::Flow,
+            _ => Part::Frame,
+        }
+    }
+
     fn colour_at(&self, x: i32, y: i32) -> Option<Colour> {
         let at = self.at(x, y)?;
         // A border or a label on a box has no flow; an arrowhead and a caption
@@ -246,12 +278,16 @@ impl Canvas {
             .map(|y| {
                 let mut spans: Vec<Span> = Vec::new();
                 for x in (0..self.grid.width()).filter_map(|x| i32::try_from(x).ok()) {
-                    let (ch, colour) = (self.cell(x, y), self.colour_at(x, y));
+                    let ch = self.cell(x, y);
+                    let (colour, part) = (self.colour_at(x, y), self.part_at(x, y));
                     match spans.last_mut() {
-                        Some(span) if span.colour == colour => span.text.push(ch),
+                        Some(span) if span.colour == colour && span.part == part => {
+                            span.text.push(ch);
+                        }
                         _ => spans.push(Span {
                             text: ch.to_string(),
                             colour,
+                            part,
                         }),
                     }
                 }
@@ -445,6 +481,27 @@ mod tests {
         assert_eq!(drawn(&canvas)[1], "──┼──");
         canvas.bridge(&[crossed(2, 1, None)]);
         assert_eq!(drawn(&canvas)[1], "─╴│╶─");
+    }
+
+    /// A box border and an untagged edge are told apart.
+    ///
+    /// Both have no palette slot, so a caller comparing colours alone draws them
+    /// the same — and a line through a drawing and the furniture of it are not
+    /// the same thing to a reader.
+    #[test]
+    fn a_border_is_frame_and_an_untagged_edge_is_flow() {
+        let mut canvas = Canvas::new(8, 3);
+        canvas.path(&[(0, 1), (7, 1)], None);
+        canvas.rect(3, 0, 3, 3);
+
+        let parts: Vec<_> = canvas
+            .runs()
+            .into_iter()
+            .flatten()
+            .map(|span| (span.part, span.colour))
+            .collect();
+        assert!(parts.contains(&(Part::Flow, None)), "the edge: {parts:?}");
+        assert!(parts.contains(&(Part::Frame, None)), "the box: {parts:?}");
     }
 
     /// A bridged cell carries the line that survived it.

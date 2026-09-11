@@ -299,6 +299,12 @@ without the library needing to know what a colour is.
 `Options` carries the target width, how parallel runs are bundled, and how
 crossings are drawn.
 
+A span identifies which part of the drawing it belongs to as well as which
+flow, if any. A box border and an edge with no tags both carry no palette
+slot, and a caller who looked only at the slot would draw the two alike,
+which is wrong on both counts: a border and a bare line through it are
+different things and should not share a style.
+
 ## 8. Quality requirements
 
 The same graph and options must produce the same bytes every time. Any

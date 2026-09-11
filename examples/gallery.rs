@@ -20,7 +20,7 @@ mod common;
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
-use orthodag::{Crossing, Graph, Options, Score, Span};
+use orthodag::{Crossing, Graph, Options, Part, Score, Span};
 
 /// The frames each graph is shown in.
 fn tabs() -> Vec<(&'static str, Options)> {
@@ -130,8 +130,8 @@ fn frame(rows: &[Vec<Span>]) -> String {
     let mut out = String::new();
     for row in rows {
         for span in row {
-            match span.colour {
-                Some(slot) => {
+            match (span.part, span.colour) {
+                (Part::Flow, Some(slot)) => {
                     let _ = write!(
                         out,
                         "<i class=\"c{}\">{}</i>",
@@ -139,7 +139,12 @@ fn frame(rows: &[Vec<Span>]) -> String {
                         escape(&span.text)
                     );
                 }
-                None => out.push_str(&escape(&span.text)),
+                // An untagged edge is still an edge. Drawn in the same ink as a
+                // box border it reads as part of the box.
+                (Part::Flow, None) => {
+                    let _ = write!(out, "<i class=\"plain\">{}</i>", escape(&span.text));
+                }
+                (Part::Frame, _) => out.push_str(&escape(&span.text)),
             }
         }
         out.push('\n');
@@ -188,6 +193,9 @@ textarea { width:100%; height:70px; padding:8px; background:#0c0d13; color:var(-
 i { font-style:normal }
 .c0{color:#6cc5d9} .c1{color:#c98fd4} .c2{color:#d9c26c} .c3{color:#7fc98f}
 .c4{color:#7f9fd9} .c5{color:#d98080}
+/* A flow with no tags. Dimmer than the boxes, which are the furniture and
+   should not compete with the lines for attention. */
+.plain{color:#5a5f73}
 ";
 
 const SCRIPT: &str = r"

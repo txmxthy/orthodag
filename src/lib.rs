@@ -28,7 +28,7 @@ mod score;
 
 pub use defect::{Defect, Fault};
 pub use drawing::{Drawing, Rect};
-pub use paint::Span;
+pub use paint::{Part, Span};
 pub use score::Score;
 
 pub use colour::{Colour, PALETTE};
