@@ -26,9 +26,26 @@ pub(crate) struct Ink {
 ///
 /// Rasterised through the same walk the painter uses, so the numbers describe
 /// the picture that actually gets printed rather than an idea of it.
+/// Held flat: one run of ink for the whole drawing, and where each cell's share
+/// of it starts.
+///
+/// A vector per cell is the obvious shape and it allocates once per drawn cell —
+/// thousands of times for one drawing, and a drawing is made hundreds of times
+/// for one graph. Holding a cell's ink inline instead was tried and is worse:
+/// the cell grows, and the walk is over every cell of the frame whether or not
+/// anything was drawn in it, so the reading costs more than the allocating saved.
+///
+/// So the ink goes in one run. Counting first says how much room each cell
+/// needs, a running sum says where each one starts, and a second walk fills
+/// them. Two passes over the routes, two allocations for the drawing, and a cell
+/// is four bytes.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Raster {
-    cells: Vec<Vec<Ink>>,
+    /// Where each cell's ink starts, with one extra on the end.
+    starts: Vec<u32>,
+    /// How much of its room each cell has taken.
+    filled: Vec<u32>,
+    ink: Vec<Ink>,
     width: usize,
     height: usize,
 }
@@ -38,8 +55,42 @@ impl Raster {
     pub(crate) fn of(layout: &Layout) -> Self {
         let width = usize::try_from(layout.width).unwrap_or(0);
         let height = usize::try_from(layout.height).unwrap_or(0);
+        let cells = width * height;
+
+        // An edge that touches a cell twice is counted twice here and stored
+        // once, so this is room enough rather than room exactly.
+        let mut starts = vec![0u32; cells + 1];
+        let mut count = |x: i32, y: i32| {
+            if let Some(at) = index_of(width, height, x, y)
+                && let Some(slot) = starts.get_mut(at + 1)
+            {
+                *slot += 1;
+            }
+        };
+        for route in &layout.routes {
+            walk(&route.points, |x, y, _| count(x, y));
+        }
+        for at in 1..starts.len() {
+            starts[at] += starts[at - 1];
+        }
+
+        let total = starts.last().copied().unwrap_or(0) as usize;
         let mut raster = Self {
-            cells: vec![Vec::new(); width * height],
+            starts,
+            filled: vec![0; cells],
+            // Room, not content: `filled` says how much of each cell's share is
+            // real and nothing reads past it, so what this is filled with is
+            // never seen. Any edge of the drawing will do, and where there is no
+            // edge there is no room either.
+            ink: layout.routes.first().map_or_else(Vec::new, |route| {
+                vec![
+                    Ink {
+                        edge: route.edge,
+                        bits: 0
+                    };
+                    total
+                ]
+            }),
             width,
             height,
         };
@@ -56,6 +107,17 @@ impl Raster {
         raster
     }
 
+    /// One cell's ink.
+    fn cell(&self, at: usize) -> &[Ink] {
+        let (Some(from), Some(taken)) = (self.starts.get(at), self.filled.get(at)) else {
+            return &[];
+        };
+        let from = *from as usize;
+        self.ink
+            .get(from..from + *taken as usize)
+            .unwrap_or_default()
+    }
+
     /// What is in one cell: one entry per edge that touched it.
     ///
     /// An edge that passes through a cell twice — which routing should not
@@ -63,41 +125,62 @@ impl Raster {
     /// what it left.
     #[cfg(test)]
     pub(crate) fn at(&self, x: i32, y: i32) -> &[Ink] {
-        self.index(x, y).map_or(&[], |at| self.cells[at].as_slice())
+        self.index(x, y).map_or(&[], |at| self.cell(at))
     }
 
     /// Every cell that anything was drawn in.
     pub(crate) fn drawn(&self) -> impl Iterator<Item = (i32, i32, &[Ink])> {
-        self.cells
+        self.filled
             .iter()
             .enumerate()
-            .filter(|(_, ink)| !ink.is_empty())
-            .filter_map(move |(at, ink)| {
+            .filter(|(_, taken)| **taken > 0)
+            .filter_map(move |(at, _)| {
                 let width = self.width.max(1);
                 let x = i32::try_from(at % width).ok()?;
                 let y = i32::try_from(at / width).ok()?;
-                Some((x, y, ink.as_slice()))
+                Some((x, y, self.cell(at)))
             })
     }
 
     /// How many cells carry an edge glyph.
     pub(crate) fn ink(&self) -> usize {
-        self.cells.iter().filter(|ink| !ink.is_empty()).count()
+        self.filled.iter().filter(|taken| **taken > 0).count()
     }
 
     fn add(&mut self, x: i32, y: i32, ink: Ink) {
         let Some(at) = self.index(x, y) else { return };
-        match self.cells[at].iter_mut().find(|held| held.edge == ink.edge) {
-            Some(held) => held.bits |= ink.bits,
-            None => self.cells[at].push(ink),
+        let (Some(from), Some(taken)) =
+            (self.starts.get(at).copied(), self.filled.get(at).copied())
+        else {
+            return;
+        };
+        let from = from as usize;
+        let held = from..from + taken as usize;
+        if let Some(found) = self
+            .ink
+            .get_mut(held)
+            .and_then(|held| held.iter_mut().find(|at| at.edge == ink.edge))
+        {
+            found.bits |= ink.bits;
+            return;
+        }
+        if let Some(slot) = self.ink.get_mut(from + taken as usize) {
+            *slot = ink;
+            if let Some(taken) = self.filled.get_mut(at) {
+                *taken += 1;
+            }
         }
     }
 
     fn index(&self, x: i32, y: i32) -> Option<usize> {
-        let x = usize::try_from(x).ok().filter(|x| *x < self.width)?;
-        let y = usize::try_from(y).ok().filter(|y| *y < self.height)?;
-        Some(y * self.width + x)
+        index_of(self.width, self.height, x, y)
     }
+}
+
+fn index_of(width: usize, height: usize, x: i32, y: i32) -> Option<usize> {
+    let x = usize::try_from(x).ok().filter(|x| *x < width)?;
+    let y = usize::try_from(y).ok().filter(|y| *y < height)?;
+    Some(y * width + x)
 }
 
 /// What one edge cost, counted on the drawn cells.
