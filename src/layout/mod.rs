@@ -14,6 +14,9 @@ mod rank;
 pub(crate) mod route;
 mod track;
 
+use std::cell::Cell;
+use std::time::{Duration, Instant};
+
 use crate::graph::{EdgeId, Graph, NodeId};
 use crate::options::Options;
 
@@ -43,6 +46,79 @@ impl Adjacency {
     pub(crate) fn out(&self, node: NodeId) -> &[EdgeId] {
         self.out.get(node.index()).map_or(&[], Vec::as_slice)
     }
+}
+
+/// How long each phase of one drawing took.
+///
+/// The phases are separable and their costs are not remotely equal: the ones
+/// that read the graph are linear and the ones that draw candidates are a search
+/// budgeted in edges. Which is which stops being a guess once it is measured,
+/// and a guess is what a budget is until then.
+///
+/// Timed here rather than by a caller because only this knows where the phase
+/// boundaries are, and only this knows how many times each one ran.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Phases {
+    /// Finding the back edges. Once.
+    pub acyclic: Duration,
+    /// Assigning ranks. Once.
+    pub rank: Duration,
+    /// Cutting long edges into single hops. Once.
+    pub layer: Duration,
+    /// Proposing column orders. Once, and it proposes seventeen at most.
+    pub order: Duration,
+    /// Giving every slot a row. Once per candidate the searches try.
+    pub place: Duration,
+    /// Attach rows, tracks and polylines. Once per drawing made.
+    pub route: Duration,
+    /// Putting a number on a drawing. Once per drawing made.
+    pub score: Duration,
+    /// Wall clock for the whole thing, which is more than the parts: the
+    /// searches spend time deciding as well as drawing.
+    pub total: Duration,
+    /// How many drawings were made and scored getting to the one returned.
+    pub drawings: usize,
+}
+
+/// Where the time goes, gathered as it is spent.
+///
+/// The phases that read the graph run once and can be timed by wrapping the
+/// call. The ones inside a search do not: `place`, `route` and `score` are
+/// called once per candidate, by three different searches, interleaved. So they
+/// are metered where they happen rather than around a phase boundary that does
+/// not exist, and the counters ride along with everything else the search needs.
+#[derive(Default)]
+pub(crate) struct Meter {
+    place: Cell<Duration>,
+    route: Cell<Duration>,
+    score: Cell<Duration>,
+    drawings: Cell<usize>,
+}
+
+impl Meter {
+    fn add(cell: &Cell<Duration>, took: Duration) {
+        cell.set(cell.get().saturating_add(took));
+    }
+}
+
+/// Runs `work`, adding what it took to `cell`.
+fn timed<T>(cell: &Cell<Duration>, work: impl FnOnce() -> T) -> T {
+    let began = Instant::now();
+    let out = work();
+    Meter::add(cell, began.elapsed());
+    out
+}
+
+/// Lays a graph out and says where the time went.
+pub(crate) fn phases(g: &Graph, options: Options) -> Phases {
+    let mut phases = Phases::default();
+    build_metered(
+        g,
+        route::Style::natural(options),
+        &Meter::default(),
+        &mut phases,
+    );
+    phases
 }
 
 /// Everything, in order: acyclic, ranked, layered, ordered, placed, routed.
@@ -85,22 +161,47 @@ pub(crate) fn build(g: &Graph, options: Options) -> route::Layout {
 /// wrong is not worse, it is broken. Ties keep the earliest candidate, which is
 /// the one the sweeps reached first, so the choice is deterministic.
 fn build_at(g: &Graph, style: route::Style) -> route::Layout {
+    build_metered(g, style, &Meter::default(), &mut Phases::default())
+}
+
+fn build_metered(
+    g: &Graph,
+    style: route::Style,
+    meter: &Meter,
+    phases: &mut Phases,
+) -> route::Layout {
+    let began = Instant::now();
     let adj = Adjacency::of(g);
+
+    let at = Instant::now();
     let acyclic = acyclic::back_edges(g, &adj);
+    phases.acyclic = at.elapsed();
+
+    let at = Instant::now();
     let ranked = rank::rank(g, &adj, &acyclic);
+    phases.rank = at.elapsed();
+
+    let at = Instant::now();
     let layered = layer::layer(g, &adj, &acyclic, &ranked);
+    phases.layer = at.elapsed();
+
     let hops = order::Hops::of(&layered);
     let interiors = port::interiors(g, &acyclic);
 
     let draw = |columns: &order::Columns, placed: &place::Placed| {
-        let ports = port::rows(g, &acyclic, columns, placed);
-        route::route(g, &acyclic, columns, placed, &ports, style)
+        meter.drawings.set(meter.drawings.get() + 1);
+        timed(&meter.route, || {
+            let ports = port::rows(g, &acyclic, columns, placed);
+            route::route(g, &acyclic, columns, placed, &ports, style)
+        })
     };
     // Tier before scalar: a categorical defect is not a large cost, it is a
     // different kind of thing, and no total buys one back.
     let worth = |layout: &route::Layout| {
-        let score = crate::score::score(g, layout);
-        (score.vocabulary().iter().sum::<usize>(), score.total)
+        timed(&meter.score, || {
+            let score = crate::score::score(g, layout);
+            (score.vocabulary().iter().sum::<usize>(), score.total)
+        })
     };
 
     let judge = Judge {
@@ -109,10 +210,15 @@ fn build_at(g: &Graph, style: route::Style) -> route::Layout {
         interiors: &interiors,
         draw: &draw,
         worth: &worth,
+        meter,
     };
 
+    let at = Instant::now();
+    let proposed = order::orderings(&layered);
+    phases.order = at.elapsed();
+
     let mut best: Option<((usize, i64), order::Columns)> = None;
-    for columns in order::orderings(&layered).iter().take(drawn(g)) {
+    for columns in proposed.iter().take(drawn(g)) {
         let key = judge.worth_of(columns, &lay(&judge, columns));
         if best.as_ref().is_none_or(|(held, _)| key < *held) {
             best = Some((key, columns.clone()));
@@ -124,7 +230,14 @@ fn build_at(g: &Graph, style: route::Style) -> route::Layout {
 
     let columns = shuffle(&judge, &columns);
     let placed = lay(&judge, &columns);
-    draw(&columns, &placed)
+    let out = draw(&columns, &placed);
+
+    phases.place = meter.place.get();
+    phases.route = meter.route.get();
+    phases.score = meter.score.get();
+    phases.drawings = meter.drawings.get();
+    phases.total = began.elapsed();
+    out
 }
 
 /// Everything a search needs to try a drawing and put a price on it.
@@ -140,6 +253,7 @@ struct Judge<'a> {
     interiors: &'a [usize],
     draw: &'a dyn Fn(&order::Columns, &place::Placed) -> route::Layout,
     worth: &'a dyn Fn(&route::Layout) -> (usize, i64),
+    meter: &'a Meter,
 }
 
 impl Judge<'_> {
@@ -232,12 +346,16 @@ fn tried(judge: &Judge, columns: &order::Columns) -> place::Placed {
     let Judge {
         g, hops, interiors, ..
     } = *judge;
-    let merged = place::place(g, columns, hops, interiors, place::Merge::Flows);
+    let merged = timed(&judge.meter.place, || {
+        place::place(g, columns, hops, interiors, place::Merge::Flows)
+    });
     let key = judge.worth_of(columns, &merged);
     if key.0 == 0 {
         return merged;
     }
-    let apart = place::place(g, columns, hops, interiors, place::Merge::Apart);
+    let apart = timed(&judge.meter.place, || {
+        place::place(g, columns, hops, interiors, place::Merge::Apart)
+    });
     if judge.worth_of(columns, &apart) < key {
         apart
     } else {
@@ -272,7 +390,9 @@ fn settle(judge: &Judge, columns: &order::Columns, merge: place::Merge) -> place
     let Judge {
         g, hops, interiors, ..
     } = *judge;
-    let mut placed = place::place(g, columns, hops, interiors, merge);
+    let mut placed = timed(&judge.meter.place, || {
+        place::place(g, columns, hops, interiors, merge)
+    });
     let mut best = judge.worth_of(columns, &placed);
     let Some(passes) = climbed(g) else {
         return placed;
@@ -282,7 +402,9 @@ fn settle(judge: &Judge, columns: &order::Columns, merge: place::Merge) -> place
         let mut moved = false;
         for column in 0..columns.len() {
             for delta in OFFERS {
-                let trial = place::nudge(g, columns, &placed, column, delta, merge);
+                let trial = timed(&judge.meter.place, || {
+                    place::nudge(g, columns, &placed, column, delta, merge)
+                });
                 let key = judge.worth_of(columns, &trial);
                 if key < best {
                     best = key;

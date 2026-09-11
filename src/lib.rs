@@ -20,6 +20,8 @@ pub mod options;
 
 // Phases land before there is a `layout()` to call them from; the allow comes
 // off with the function that ties them together.
+// Five helpers under here are unused and were unused before this allow was
+// needed for the phases; they are somebody's to keep or drop, not this change's.
 #[allow(dead_code)]
 mod layout;
 #[allow(dead_code)]
@@ -28,6 +30,7 @@ mod score;
 
 pub use defect::{Defect, Fault};
 pub use drawing::{Drawing, Rect};
+pub use layout::Phases;
 pub use paint::{Part, Span};
 pub use score::Score;
 
@@ -152,4 +155,13 @@ pub fn defects(graph: &Graph) -> Vec<Defect> {
 /// Everything wrong with the drawing of a graph, with options.
 pub fn defects_with(graph: &Graph, options: Options) -> Vec<Defect> {
     score::defects(graph, &layout::build(graph, options))
+}
+
+/// Where the time goes laying a graph out.
+///
+/// The phases are separable and their costs are not remotely equal. Which ones
+/// matter stops being a guess once it is measured, and a guess is all a budget
+/// is until then — see [`Phases`].
+pub fn phases(graph: &Graph) -> Phases {
+    layout::phases(graph, Options::default())
 }

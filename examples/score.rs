@@ -16,6 +16,58 @@
 #[path = "../tests/common/mod.rs"]
 mod common;
 
+use std::time::Duration;
+
+/// Where the time goes, summed over every graph.
+///
+/// Per graph it is noise — most of them lay out in well under a millisecond —
+/// and over the set it says which phase a budget is actually spent on.
+fn phases(names: &[String]) {
+    let mut graphs: Vec<(String, orthodag::Graph)> = common::fixtures()
+        .into_iter()
+        .map(|(name, g)| (name.to_owned(), g))
+        .collect();
+    graphs.extend(common::generated(12));
+    graphs.extend(common::corpus());
+    graphs.retain(|(name, _)| names.contains(name));
+
+    let mut sum = [Duration::ZERO; 7];
+    let (mut total, mut drawings) = (Duration::ZERO, 0);
+    for (_, g) in &graphs {
+        let p = orthodag::phases(g);
+        for (at, took) in [
+            p.acyclic, p.rank, p.layer, p.order, p.place, p.route, p.score,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            sum[at] += took;
+        }
+        total += p.total;
+        drawings += p.drawings;
+    }
+
+    let labels = [
+        "acyclic", "rank", "layer", "order", "place", "route", "score",
+    ];
+    eprintln!(
+        "\nby phase, over {} graphs, {drawings} drawings made",
+        graphs.len()
+    );
+    for (name, took) in labels.iter().zip(sum) {
+        let share = if total.is_zero() {
+            0.0
+        } else {
+            took.as_secs_f64() / total.as_secs_f64() * 100.0
+        };
+        eprintln!(
+            "  {name:<12}{:>8.1}ms{share:>7.1}%",
+            took.as_secs_f64() * 1000.0
+        );
+    }
+    eprintln!("  {:<12}{:>8.1}ms", "total", total.as_secs_f64() * 1000.0);
+}
+
 fn main() {
     let record = std::env::args().any(|arg| arg == "--record");
     let wide = std::env::args().any(|arg| arg == "--wide");
@@ -31,6 +83,7 @@ fn main() {
 
     // Recording is the machine path: its output is compared against a stored
     // baseline, and a time is different every run.
+    let names: Vec<_> = graphs.iter().map(|(n, _)| n.clone()).collect();
     let mut watch = common::progress::Progress::new(graphs.len(), record);
     let mut scored: Vec<_> = graphs
         .into_iter()
@@ -40,6 +93,10 @@ fn main() {
         })
         .collect();
     watch.finish();
+
+    if std::env::args().any(|arg| arg == "--phases") {
+        phases(&names);
+    }
     scored.sort_by(|a, b| (b.1.total, &a.0).cmp(&(a.1.total, &b.0)));
     let widest = scored
         .iter()

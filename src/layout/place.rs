@@ -153,14 +153,6 @@ pub(crate) fn place(
 /// other; what changes is where they sit relative to the columns either side.
 /// The placeholders are laid again afterwards, since the rows they were
 /// straightened onto were chosen around the boxes that just moved.
-/// The same placement with the long edges laid again the other way.
-pub(crate) fn relaid(g: &Graph, columns: &Columns, placed: &Placed, merge: Merge) -> Placed {
-    let mut moved = placed.clone();
-    straighten(g, columns, &mut moved, merge);
-    normalise(&mut moved);
-    moved
-}
-
 pub(crate) fn nudge(
     g: &Graph,
     columns: &Columns,
