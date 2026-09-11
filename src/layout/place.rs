@@ -12,7 +12,7 @@
 
 use super::layer::Slot;
 use super::order::{Columns, Hops};
-use crate::graph::{EdgeId, Graph};
+use crate::graph::{EdgeId, Graph, NodeId};
 
 /// Blank rows between two stacked slots.
 const GAP: i32 = 1;
@@ -115,7 +115,7 @@ pub(crate) fn place(g: &Graph, columns: &Columns, hops: &Hops, interiors: &[usiz
     }
 
     normalise(&mut placed);
-    straighten(columns, &mut placed);
+    straighten(g, columns, &mut placed);
     normalise(&mut placed);
     placed
 }
@@ -133,7 +133,13 @@ pub(crate) fn place(g: &Graph, columns: &Columns, hops: &Hops, interiors: &[usiz
 /// other; what changes is where they sit relative to the columns either side.
 /// The placeholders are laid again afterwards, since the rows they were
 /// straightened onto were chosen around the boxes that just moved.
-pub(crate) fn nudge(columns: &Columns, placed: &Placed, column: usize, delta: i32) -> Placed {
+pub(crate) fn nudge(
+    g: &Graph,
+    columns: &Columns,
+    placed: &Placed,
+    column: usize,
+    delta: i32,
+) -> Placed {
     let mut moved = placed.clone();
     if let (Some(slots), Some(tops)) = (columns.get(column), moved.tops.get_mut(column)) {
         for (at, slot) in slots.iter().enumerate() {
@@ -145,7 +151,7 @@ pub(crate) fn nudge(columns: &Columns, placed: &Placed, column: usize, delta: i3
         }
     }
     normalise(&mut moved);
-    straighten(columns, &mut moved);
+    straighten(g, columns, &mut moved);
     normalise(&mut moved);
     moved
 }
@@ -164,8 +170,8 @@ pub(crate) fn nudge(columns: &Columns, placed: &Placed, column: usize, delta: i3
 ///
 /// Rows are handed out longest chain first, because a chain crossing six
 /// columns has the least freedom and should not be left with what is left.
-fn straighten(columns: &Columns, placed: &mut Placed) {
-    let mut chains = chains(columns);
+fn straighten(g: &Graph, columns: &Columns, placed: &mut Placed) {
+    let mut chains = flows(g, columns);
     chains.sort_by_key(|(edge, cells)| (std::cmp::Reverse(cells.len()), *edge));
 
     // One row of slack per chain is enough for every chain to find a row of its
@@ -188,6 +194,44 @@ fn straighten(columns: &Columns, placed: &mut Placed) {
             }
         }
     }
+}
+
+/// The placeholders of each long edge, gathered by the flow they belong to.
+///
+/// Two edges carrying the same tags into the same box are one line as far as a
+/// reader is concerned — `design.md` §3 — so their placeholders want one row
+/// between them, not a row each. Laid separately they do the opposite: the
+/// first takes a row, marks it taken, and the second is pushed off it, so one
+/// line is drawn as two that then have to cross to reach the same door.
+///
+/// Their cells are merged into one chain here, which gives the group a single
+/// row wherever any of them passes and makes the overlap literal — the same
+/// cells, and so one line.
+fn flows(g: &Graph, columns: &Columns) -> Vec<(EdgeId, Vec<(usize, usize)>)> {
+    let mut flows: Vec<(EdgeId, Vec<(usize, usize)>)> = Vec::new();
+    let mut keys: Vec<(NodeId, &[String])> = Vec::new();
+
+    for (edge, cells) in chains(columns) {
+        // Tagged only. Two edges carrying the same tags into one box are one
+        // flow and one line; two untagged ones are two lines that happen to
+        // share a door, and drawing them as one would say something about them
+        // that nothing in the graph supports.
+        let Some(held) = g.edge(edge).filter(|e| !e.tags().is_empty()) else {
+            flows.push((edge, cells));
+            continue;
+        };
+        let key = (held.to(), held.tags());
+        if let Some(at) = keys.iter().position(|k| *k == key)
+            && let Some((id, held)) = flows.get_mut(at)
+        {
+            *id = (*id).min(edge);
+            held.extend(cells);
+            continue;
+        }
+        keys.push(key);
+        flows.push((edge, cells));
+    }
+    flows
 }
 
 /// The placeholders of each long edge, by column and position.
@@ -634,6 +678,55 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Two long edges of one flow into one box run on one row.
+    ///
+    /// Same tags, same target: one line, by `design.md` §3. Laid separately
+    /// each takes a row and marks it taken, so the second is pushed off the
+    /// first and the two have to cross to reach the same door.
+    #[test]
+    fn one_flow_into_one_box_takes_one_row() {
+        let mut g = Graph::new();
+        let ids: Vec<_> = ["a", "b", "c", "d", "z"]
+            .iter()
+            .map(|n| g.add_node(Node::new(*n)))
+            .collect();
+        g.add_edge(ids[0], ids[1]);
+        g.add_edge(ids[1], ids[2]);
+        g.add_edge(ids[2], ids[3]);
+        g.add_edge(ids[3], ids[4]);
+        // Both skip, both carry `t`, both end at z.
+        g.add_tagged_edge(ids[1], ids[4], ["t"]);
+        g.add_tagged_edge(ids[2], ids[4], ["t"]);
+
+        let adj = Adjacency::of(&g);
+        let acyclic = back_edges(&g, &adj);
+        let ranked = rank(&g, &adj, &acyclic);
+        let layered = layer(&g, &adj, &acyclic, &ranked);
+        let columns = layered.all().to_vec();
+        let placed = place(
+            &g,
+            &columns,
+            &order::Hops::of(&layered),
+            &super::super::port::interiors(&g, &acyclic),
+        );
+
+        let mut rows: Vec<(usize, i32)> = Vec::new();
+        for (column, slots) in columns.iter().enumerate() {
+            for (at, slot) in slots.iter().enumerate() {
+                if matches!(slot, Slot::Pass(_)) {
+                    rows.push((column, placed.middle(column, at)));
+                }
+            }
+        }
+        let shared = rows.len() - {
+            let mut distinct = rows.clone();
+            distinct.sort_unstable();
+            distinct.dedup();
+            distinct.len()
+        };
+        assert!(shared > 0, "one flow was drawn as two lines");
     }
 
     #[test]

@@ -72,9 +72,16 @@ Ids are newtypes over `u32` and index the two vectors. The graph is built by
 the caller, and the library never parses anything.
 
 Tags do a lot of work. Two edges carrying the same tags and ending at the
-same vertex read as the same line to a reader, and the layout may draw them
-as one. Tags also key the palette, so a logical flow keeps one colour across
-the whole drawing.
+same vertex read as the same line to a reader, and the layout draws them as
+one: where both edges are long enough to need placeholder rows, the pair
+shares a single row instead of one each, so the merge is literal and they
+arrive along a single trunk.
+
+An untagged edge is not part of any flow. Two untagged edges arriving at
+one vertex are two separate lines that happen to share a door, and nothing
+in the graph declares them related, so each keeps its own row. Tags also
+key the palette, so a logical flow keeps one colour across the whole
+drawing.
 
 ## 4. The pipeline
 

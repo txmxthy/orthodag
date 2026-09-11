@@ -216,7 +216,7 @@ fn settle(
         let mut moved = false;
         for column in 0..columns.len() {
             for delta in OFFERS {
-                let trial = place::nudge(columns, &placed, column, delta);
+                let trial = place::nudge(g, columns, &placed, column, delta);
                 let key = worth(&draw(columns, &trial));
                 if key < best {
                     best = key;
