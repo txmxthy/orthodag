@@ -71,6 +71,13 @@ fn phases(names: &[String]) {
 fn main() {
     let record = std::env::args().any(|arg| arg == "--record");
     let wide = std::env::args().any(|arg| arg == "--wide");
+    // `--fit N`: lay every graph out for a terminal N columns across, which is
+    // the path anything with a window takes and a different cost entirely — the
+    // compaction ladder is a whole layout per rung.
+    let fit = std::env::args()
+        .skip_while(|arg| arg != "--fit")
+        .nth(1)
+        .and_then(|n| n.parse::<usize>().ok());
 
     let mut graphs: Vec<(String, orthodag::Graph)> = common::fixtures()
         .into_iter()
@@ -88,7 +95,10 @@ fn main() {
     let mut scored: Vec<_> = graphs
         .into_iter()
         .map(|(name, g)| {
-            let score = watch.graph(&name, || orthodag::score(&g));
+            let options = fit.map_or_else(orthodag::Options::new, |width| {
+                orthodag::Options::new().width(width)
+            });
+            let score = watch.graph(&name, || orthodag::score_with(&g, options));
             (name, score)
         })
         .collect();
