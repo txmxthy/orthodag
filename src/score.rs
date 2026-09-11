@@ -448,8 +448,22 @@ pub(crate) fn defects(g: &Graph, layout: &Layout) -> Vec<crate::defect::Defect> 
 /// rather than working them out for itself: what counts as a crossing is the
 /// objective's business, and a painter that disagreed with the scorer about it
 /// would draw a bridge over something the numbers called an overlap.
-pub(crate) fn crossing_cells(g: &Graph, layout: &Layout) -> Vec<(i32, i32)> {
+pub(crate) fn crossing_cells(g: &Graph, layout: &Layout) -> Vec<Crossed> {
     cells_where_crossing(g, layout, false)
+}
+
+/// A cell two edges pass through, and the colour of the one going down it.
+///
+/// The painter needs the colour as well as the place. Cutting the horizontal
+/// leaves the vertical as the only line drawn there, so the cell stops holding
+/// two inks and starts holding one — and without being told which, it would
+/// keep the "two colours met here" it was stained with and come out in the
+/// caller's default.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct Crossed {
+    pub(crate) x: i32,
+    pub(crate) y: i32,
+    pub(crate) down: Option<crate::colour::Colour>,
 }
 
 /// The crossing cells where the two runs are different colours.
@@ -458,40 +472,33 @@ pub(crate) fn crossing_cells(g: &Graph, layout: &Layout) -> Vec<(i32, i32)> {
 /// different flows that is a lie, and the cell can only hold one of the two
 /// colours anyway. Where they are the same colour there is nothing to tell
 /// apart and the junction is the honest glyph.
-pub(crate) fn parted_crossing_cells(g: &Graph, layout: &Layout) -> Vec<(i32, i32)> {
+pub(crate) fn parted_crossing_cells(g: &Graph, layout: &Layout) -> Vec<Crossed> {
     cells_where_crossing(g, layout, true)
 }
 
-fn cells_where_crossing(g: &Graph, layout: &Layout, parted: bool) -> Vec<(i32, i32)> {
-    if !parted {
-        return raw_crossing_cells(g, layout);
-    }
+fn cells_where_crossing(g: &Graph, layout: &Layout, parted: bool) -> Vec<Crossed> {
     let colours = crate::colour::of(g);
     let slot = |edge: EdgeId| colours.get(edge.index()).copied().flatten();
-    Raster::of(layout)
-        .drawn()
-        .filter(|(_, _, ink)| {
-            ink.iter().enumerate().any(|(at, one)| {
-                ink[at + 1..].iter().any(|other| {
-                    crossing(one.bits, other.bits) && slot(one.edge) != slot(other.edge)
-                })
-            })
-        })
-        .map(|(x, y, _)| (x, y))
-        .collect()
-}
 
-fn raw_crossing_cells(g: &Graph, layout: &Layout) -> Vec<(i32, i32)> {
     Raster::of(layout)
         .drawn()
-        .filter(|(_, _, ink)| {
-            ink.iter().enumerate().any(|(at, one)| {
-                ink[at + 1..]
-                    .iter()
-                    .any(|other| shared(g, *one, *other) == Shared::Crossing)
-            })
+        .filter_map(|(x, y, ink)| {
+            let crossed = ink.iter().enumerate().any(|(at, one)| {
+                ink[at + 1..].iter().any(|other| {
+                    crossing(one.bits, other.bits)
+                        && (!parted || slot(one.edge) != slot(other.edge))
+                })
+            });
+            if !crossed {
+                return None;
+            }
+            // The one that keeps its glyph is the one running down the cell.
+            let down = ink
+                .iter()
+                .find(|held| held.bits & (U | D) != 0)
+                .and_then(|held| slot(held.edge));
+            Some(Crossed { x, y, down })
         })
-        .map(|(x, y, _)| (x, y))
         .collect()
 }
 

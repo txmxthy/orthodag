@@ -168,14 +168,30 @@ impl Canvas {
     /// The cell itself becomes plain vertical, and the horizontal is cut one
     /// cell either side — but only where that neighbour is plain line. A corner
     /// or a junction beside a crossing is doing its own job and stays.
-    pub(crate) fn bridge(&mut self, cells: &[(i32, i32)]) {
-        for (x, y) in cells {
-            if self.at(*x, *y).is_none() {
+    pub(crate) fn bridge(&mut self, cells: &[crate::score::Crossed]) {
+        for cell in cells {
+            let (x, y) = (cell.x, cell.y);
+            if self.at(x, y).is_none() {
                 continue;
             }
-            self.over_line(*x, *y, '│');
-            self.over_line(x - 1, *y, '╴');
-            self.over_line(x + 1, *y, '╶');
+            self.over_line(x, y, '│');
+            self.over_line(x - 1, y, '╴');
+            self.over_line(x + 1, y, '╶');
+            // The horizontal is gone from this cell, so the two inks that met
+            // here are one again and it is the vertical's. Left as it was, the
+            // cell would keep the "two colours" it was stained with and come out
+            // in the caller's default — a grey notch in a line that was bridged
+            // precisely so it could be followed through.
+            self.relight(x, y, cell.down);
+        }
+    }
+
+    /// Sets what a cell carries, rather than adding to it.
+    fn relight(&mut self, x: i32, y: i32, colour: Option<Colour>) {
+        if let Some(at) = self.at(x, y)
+            && self.ink[at] != Ink::Blank
+        {
+            self.ink[at] = Ink::One(colour);
         }
     }
 
@@ -427,8 +443,36 @@ mod tests {
         canvas.path(&[(0, 1), (4, 1)], None);
         canvas.path(&[(2, 0), (2, 2)], None);
         assert_eq!(drawn(&canvas)[1], "──┼──");
-        canvas.bridge(&[(2, 1)]);
+        canvas.bridge(&[crossed(2, 1, None)]);
         assert_eq!(drawn(&canvas)[1], "─╴│╶─");
+    }
+
+    /// A bridged cell carries the line that survived it.
+    ///
+    /// Two colours met here, so the cell was stained as holding neither. Cutting
+    /// the horizontal leaves the vertical alone in it, and the cell has to be
+    /// told: otherwise the one place a reader most needs to follow a line
+    /// through comes out in the default ink, a grey notch in the middle of a
+    /// coloured run.
+    #[test]
+    fn a_bridged_cell_keeps_the_colour_of_the_line_that_crosses_it() {
+        let (across, down) = (Colour::from_slot(0), Colour::from_slot(1));
+        let mut canvas = Canvas::new(5, 3);
+        canvas.path(&[(0, 1), (4, 1)], Some(across));
+        canvas.path(&[(2, 0), (2, 2)], Some(down));
+        assert_eq!(canvas.colour_at(2, 1), None, "two inks, so neither");
+
+        canvas.bridge(&[crossed(2, 1, Some(down))]);
+        assert_eq!(canvas.colour_at(2, 1), Some(down));
+        assert_eq!(
+            canvas.colour_at(1, 1),
+            Some(across),
+            "the cut cell is still its own"
+        );
+    }
+
+    fn crossed(x: i32, y: i32, down: Option<Colour>) -> crate::score::Crossed {
+        crate::score::Crossed { x, y, down }
     }
 
     #[test]
@@ -439,7 +483,7 @@ mod tests {
         canvas.path(&[(0, 1), (5, 1)], None);
         canvas.path(&[(2, 0), (2, 3)], None);
         canvas.path(&[(3, 1), (3, 3)], None);
-        canvas.bridge(&[(2, 1)]);
+        canvas.bridge(&[crossed(2, 1, None)]);
         let row = &drawn(&canvas)[1];
         assert!(row.starts_with("─╴│"), "{row}");
         assert!(row.contains('┬'), "the neighbour keeps its junction: {row}");
@@ -450,7 +494,7 @@ mod tests {
         let mut canvas = Canvas::new(4, 1);
         canvas.path(&[(0, 0), (3, 0)], None);
         let before = drawn(&canvas);
-        canvas.bridge(&[(9, 9)]);
+        canvas.bridge(&[crossed(9, 9, None)]);
         assert_eq!(drawn(&canvas), before);
     }
 
