@@ -129,6 +129,7 @@ impl Drawing {
 mod tests {
     use super::*;
     use crate::graph::{Graph, Node};
+    use crate::options::Options;
 
     /// Two boxes, one straight line: the drawing every metric is calibrated to
     /// charge nothing for.
@@ -196,6 +197,66 @@ mod tests {
 
         assert!(
             crate::score_drawing(&g, &wandering).total > crate::score_drawing(&g, &straight).total
+        );
+    }
+
+    /// Two untagged edges crossing are still two lines.
+    ///
+    /// They share an ink because neither has one, which is not the same as
+    /// belonging to the same flow: nothing about them says they are one line,
+    /// and a reader following either through a junction cannot tell which way it
+    /// went. The break is what tells them apart, and it is the only thing that
+    /// can, since there is no colour to do it.
+    #[test]
+    fn two_untagged_edges_crossing_are_told_apart() {
+        let mut g = Graph::new();
+        let ids: Vec<_> = ["a", "b", "c", "d"]
+            .iter()
+            .map(|n| g.add_node(Node::new(*n)))
+            .collect();
+        let across = g.add_edge(ids[0], ids[1]);
+        let down = g.add_edge(ids[2], ids[3]);
+
+        let mut drawing = Drawing::new(9, 5);
+        drawing.boxed(ids[0], 0, Rect::new(0, 1, 3, 3));
+        drawing.boxed(ids[1], 1, Rect::new(6, 1, 3, 3));
+        drawing.boxed(ids[2], 0, Rect::new(3, 0, 2, 2));
+        drawing.boxed(ids[3], 1, Rect::new(3, 4, 2, 2));
+        drawing.route(across, [(3, 2), (5, 2)]);
+        drawing.route(down, [(4, 0), (4, 4)]);
+
+        let art = crate::draw_drawing(&g, &drawing, Options::default());
+        assert!(
+            art.contains('╴') || art.contains('╶'),
+            "the crossing reads as one line:\n{art}"
+        );
+    }
+
+    /// Two branches of one fan keep their junction.
+    ///
+    /// These really are one line — one ink, and a box they both leave — so the
+    /// glyph that says so is the honest one, and the tidier one.
+    #[test]
+    fn two_branches_of_one_fan_keep_their_junction() {
+        let mut g = Graph::new();
+        let ids: Vec<_> = ["a", "b", "c"]
+            .iter()
+            .map(|n| g.add_node(Node::new(*n)))
+            .collect();
+        let up = g.add_edge(ids[0], ids[1]);
+        let down = g.add_edge(ids[0], ids[2]);
+
+        let mut drawing = Drawing::new(9, 5);
+        drawing.boxed(ids[0], 0, Rect::new(0, 1, 3, 3));
+        drawing.boxed(ids[1], 1, Rect::new(6, 0, 3, 2));
+        drawing.boxed(ids[2], 1, Rect::new(6, 3, 3, 2));
+        drawing.route(up, [(3, 2), (5, 2)]);
+        drawing.route(down, [(4, 1), (4, 4)]);
+
+        let art = crate::draw_drawing(&g, &drawing, Options::default());
+        assert!(
+            !art.contains('╴') && !art.contains('╶'),
+            "a fan was broken apart:\n{art}"
         );
     }
 
