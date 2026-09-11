@@ -38,8 +38,13 @@ bench-fit width="80":
     @cargo run -q --release --features mermaid --example score -- --wide --fit {{width}} > /dev/null
 
 # every graph on one page, to be looked at (does not open a browser)
+#
+# Release. Nothing here is being debugged and the page is four layouts of every
+# graph, one of them fitted to a width — which walks a ladder and is a whole
+# layout a rung. Debug turned four minutes of waiting into what is now twenty
+# seconds.
 gallery *flags="":
-    cargo run -q --features mermaid --example gallery -- {{flags}}
+    cargo run -q --release --features mermaid --example gallery -- {{flags}}
 
 # store today's numbers as the baseline the ratchet compares against
 baseline:
