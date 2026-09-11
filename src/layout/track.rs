@@ -163,13 +163,14 @@ fn order_tracks(runs: &[Run], tracks: &[Vec<usize>]) -> Vec<usize> {
         return (0..count).collect();
     }
 
+    let between = Between::of(runs, tracks);
     let mut best: Vec<usize> = nesting(runs, tracks);
-    let mut best_cost = cost(runs, tracks, &best);
+    let mut best_cost = between.cost(&best);
 
     if count <= EXACT {
         let mut order = best.clone();
         while next_permutation(&mut order) {
-            let now = cost(runs, tracks, &order);
+            let now = between.cost(&order);
             if now < best_cost {
                 best_cost = now;
                 best.clone_from(&order);
@@ -183,7 +184,7 @@ fn order_tracks(runs: &[Run], tracks: &[Vec<usize>]) -> Vec<usize> {
             moved = false;
             for at in 0..count - 1 {
                 best.swap(at, at + 1);
-                let now = cost(runs, tracks, &best);
+                let now = between.cost(&best);
                 if now < best_cost {
                     best_cost = now;
                     moved = true;
@@ -237,45 +238,90 @@ fn nesting(runs: &[Run], tracks: &[Vec<usize>]) -> Vec<usize> {
 }
 
 /// What one left-to-right order costs: landings first, then crossings.
-fn cost(runs: &[Run], tracks: &[Vec<usize>], order: &[usize]) -> (usize, usize) {
-    let (mut landings, mut crossings) = (0, 0);
+/// What one track costs another, for each way round the two can sit.
+///
+/// The sum in [`cost`] never looks at the whole order. A run on track `T` charges
+/// its `enter` against the runs on every track left of `T` and its `leave`
+/// against those right of it, and which tracks those are is the only thing the
+/// order decides. So every pair of tracks contributes the same two numbers
+/// wherever they sit, and an order is the sum of the pairs it puts in each
+/// arrangement.
+///
+/// Worked out once per gap in a pass over the runs, an order then costs one
+/// addition per pair instead of a walk over every run it passes. The arithmetic
+/// is the same arithmetic — the same integers added in a different grouping —
+/// so the order that wins is the order that won before.
+struct Between {
+    tracks: usize,
+    /// `[left][right]`: what the runs of `right` owe for the tracks of `left`
+    /// sitting to their left, and what the runs of `left` owe for `right`
+    /// sitting to their right.
+    pairs: Vec<(usize, usize)>,
+}
 
-    for (place, track) in order.iter().enumerate() {
-        let Some(held) = tracks.get(*track) else {
-            continue;
-        };
-        for at in held {
-            let Some(run) = runs.get(*at) else { continue };
-            // The horizontal in reaches this track from the left; the one out
-            // leaves it to the right.
-            let reaches = [
-                (run.enter, &order[..place]),
-                (run.leave, &order[place + 1..]),
-            ];
-            for (row, passed) in reaches {
-                for crossed in passed {
-                    let Some(others) = tracks.get(*crossed) else {
-                        continue;
-                    };
-                    for other in others {
-                        let Some(other) = runs.get(*other) else {
-                            continue;
-                        };
-                        if other.edge == run.edge {
-                            continue;
-                        }
-                        if row == other.lo() || row == other.hi() {
-                            landings += 1;
-                        } else if row > other.lo() && row < other.hi() {
-                            crossings += 1;
-                        }
-                    }
+impl Between {
+    fn of(runs: &[Run], tracks: &[Vec<usize>]) -> Self {
+        let count = tracks.len();
+        let mut pairs = vec![(0, 0); count * count];
+
+        for (left, held) in tracks.iter().enumerate() {
+            for (right, others) in tracks.iter().enumerate() {
+                if left == right {
+                    continue;
+                }
+                let mut owed = (0, 0);
+                // A run on `right`, reached from the left by way of `left`.
+                for at in others {
+                    let Some(run) = runs.get(*at) else { continue };
+                    tally(&mut owed, runs, held, run.enter, run.edge);
+                }
+                // A run on `left`, leaving to the right across `right`.
+                for at in held {
+                    let Some(run) = runs.get(*at) else { continue };
+                    tally(&mut owed, runs, others, run.leave, run.edge);
+                }
+                if let Some(slot) = pairs.get_mut(left * count + right) {
+                    *slot = owed;
                 }
             }
         }
+        Self {
+            tracks: count,
+            pairs,
+        }
     }
 
-    (landings, crossings)
+    /// What one left-to-right order costs: landings first, then crossings.
+    fn cost(&self, order: &[usize]) -> (usize, usize) {
+        let (mut landings, mut crossings) = (0, 0);
+        for (place, left) in order.iter().enumerate() {
+            for right in &order[place + 1..] {
+                let Some((owed_landings, owed_crossings)) =
+                    self.pairs.get(left * self.tracks + right)
+                else {
+                    continue;
+                };
+                landings += owed_landings;
+                crossings += owed_crossings;
+            }
+        }
+        (landings, crossings)
+    }
+}
+
+/// What one row costs against the runs held on one track.
+fn tally(owed: &mut (usize, usize), runs: &[Run], held: &[usize], row: i32, edge: EdgeId) {
+    for at in held {
+        let Some(other) = runs.get(*at) else { continue };
+        if other.edge == edge {
+            continue;
+        }
+        if row == other.lo() || row == other.hi() {
+            owed.0 += 1;
+        } else if row > other.lo() && row < other.hi() {
+            owed.1 += 1;
+        }
+    }
 }
 
 /// The next permutation in lexicographic order, or `false` at the last one.
@@ -349,6 +395,72 @@ mod tests {
         assert_ne!(apart.of(0), apart.of(1), "two flows, two tracks");
     }
 
+    /// The pair table says what walking the whole order used to say.
+    ///
+    /// The grouping changed and the arithmetic did not, so this checks the two
+    /// against each other on a gap busy enough to have opinions: four runs on
+    /// three tracks, every order, both numbers.
+    #[test]
+    fn the_pair_table_agrees_with_walking_the_order() {
+        let runs = [
+            run(0, 0, 6, node(0), node(1)),
+            run(1, 6, 2, node(2), node(3)),
+            run(2, 3, 9, node(4), node(5)),
+            run(3, 9, 0, node(6), node(7)),
+        ];
+        let tracks = vec![vec![0, 1], vec![2], vec![3]];
+        let between = Between::of(&runs, &tracks);
+
+        let mut order = vec![0, 1, 2];
+        loop {
+            assert_eq!(
+                between.cost(&order),
+                walked(&runs, &tracks, &order),
+                "order {order:?}"
+            );
+            if !next_permutation(&mut order) {
+                break;
+            }
+        }
+    }
+
+    /// The sum written the long way, kept only to check the short way.
+    fn walked(runs: &[Run], tracks: &[Vec<usize>], order: &[usize]) -> (usize, usize) {
+        let (mut landings, mut crossings) = (0, 0);
+        for (place, track) in order.iter().enumerate() {
+            let Some(held) = tracks.get(*track) else {
+                continue;
+            };
+            for at in held {
+                let Some(run) = runs.get(*at) else { continue };
+                for (row, passed) in [
+                    (run.enter, &order[..place]),
+                    (run.leave, &order[place + 1..]),
+                ] {
+                    for crossed in passed {
+                        let Some(others) = tracks.get(*crossed) else {
+                            continue;
+                        };
+                        for other in others {
+                            let Some(other) = runs.get(*other) else {
+                                continue;
+                            };
+                            if other.edge == run.edge {
+                                continue;
+                            }
+                            if row == other.lo() || row == other.hi() {
+                                landings += 1;
+                            } else if row > other.lo() && row < other.hi() {
+                                crossings += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        (landings, crossings)
+    }
+
     #[test]
     fn every_permutation_is_visited_once() {
         let mut order = vec![0, 1, 2];
@@ -370,8 +482,9 @@ mod tests {
         let tracks = vec![vec![0], vec![1]];
         // a on the left means b's incoming horizontal at row 4 crosses a's
         // track exactly where a turns.
-        assert!(cost(&[a, b], &tracks, &[0, 1]).0 > 0);
-        assert_eq!(cost(&[a, b], &tracks, &[1, 0]).0, 0);
+        let between = Between::of(&[a, b], &tracks);
+        assert!(between.cost(&[0, 1]).0 > 0);
+        assert_eq!(between.cost(&[1, 0]).0, 0);
     }
 
     #[test]
