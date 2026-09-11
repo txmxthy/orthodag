@@ -430,6 +430,10 @@ const OFFERS: [i32; 4] = [-1, 1, -2, 2];
 
 /// How many passes of the descent a graph is worth, or `None` for none at all.
 ///
+/// Raising these was tried once a drawing became cheap, and bought nothing —
+/// see `docs/quality.md`. Both searches stop when a pass changes nothing, and on
+/// every graph anyone actually has they had already stopped.
+///
 /// A pass draws the graph `columns × 4` times, on top of the candidate
 /// orderings already being drawn, so this is the most expensive budget in the
 /// library and it is the first one to run out.
