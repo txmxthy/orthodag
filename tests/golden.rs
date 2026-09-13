@@ -76,14 +76,13 @@ fn a_lone_node_draws() {
 #[test]
 fn tags_draw_on_their_edges_when_asked_for() {
     let mut g = Graph::new();
-    let ids = nodes(
-        &mut g,
-        &["in", "route", "even-sink", "odd-sink", "number-sink"],
-    );
+    // A branch carrying two tags at once is the case worth a picture: it is one
+    // edge, drawn once, captioned with both.
+    let ids = nodes(&mut g, &["logs", "level", "warn", "error", "audit"]);
     g.add_edge(ids[0], ids[1]);
-    g.add_tagged_edge(ids[1], ids[2], ["even-tag"]);
-    g.add_tagged_edge(ids[1], ids[3], ["odd-tag"]);
-    g.add_tagged_edge(ids[1], ids[4], ["even-tag", "odd-tag"]);
+    g.add_tagged_edge(ids[1], ids[2], ["warn"]);
+    g.add_tagged_edge(ids[1], ids[3], ["error"]);
+    g.add_tagged_edge(ids[1], ids[4], ["warn", "error"]);
     insta::assert_snapshot!(
         "labels",
         orthodag::draw_with(&g, Options::new().labels(true))
