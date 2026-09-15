@@ -182,6 +182,19 @@ because half a box is worse than a wide one.
 
 Off by default, so nobody pays for one they do not use.
 
+### Scoring a drawing of your own
+
+You can score a drawing you made yourself, or one from a renderer you are writing, with
+the same objective this library applies to its own output:
+
+```
+cargo run --features mermaid --example compare -- graph.mmd other.json
+```
+
+`other.json` holds boxes and orthogonal polylines in cell coordinates, indexed by node
+and edge in the order the graph declares them. The example paints the supplied drawing
+and the library's own with one painter, and prints every metric side by side.
+
 ## Scoring
 
 Most of this library is a search, and a search needs an objective to descend.
