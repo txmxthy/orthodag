@@ -195,7 +195,7 @@ pub(crate) fn route(
 ) -> Layout {
     let widths = widths(g, columns, style);
     let paths = paths(g, acyclic, columns, placed, ports);
-    let runs = runs(&paths, &crate::colour::of(g));
+    let runs = runs(g, &paths, &crate::colour::of(g));
     let tracks = pack(&runs, columns.len().saturating_sub(1));
 
     let captions = captions(g, &paths, style);
@@ -468,7 +468,15 @@ fn column_of(columns: &Columns, slot: Slot) -> Option<usize> {
 ///
 /// A hop that stays on its row needs none: it is drawn as one straight line and
 /// nothing has to make room for it.
-fn runs(paths: &[Path], colours: &[Option<crate::colour::Colour>]) -> Vec<Run> {
+fn runs(g: &Graph, paths: &[Path], colours: &[Option<crate::colour::Colour>]) -> Vec<Run> {
+    // The placeholders of one flow are one line, so its runs answer to one
+    // slot: the tracks then hold them as a trunk with a branch each, where
+    // keying them per edge gave them a track each and a crossing between.
+    let rep = super::flow::representative(g);
+    let shared = |slot: Slot| match slot {
+        Slot::Pass(edge) => Slot::Pass(rep.get(edge.index()).copied().unwrap_or(edge)),
+        Slot::Node(_) => slot,
+    };
     let mut runs = Vec::new();
     for path in paths {
         for (step, pair) in path.rows.windows(2).enumerate() {
@@ -482,8 +490,8 @@ fn runs(paths: &[Path], colours: &[Option<crate::colour::Colour>]) -> Vec<Run> {
                 gap,
                 enter: from_row,
                 leave: to_row,
-                from: path.slot(gap),
-                to: path.slot(gap + 1),
+                from: shared(path.slot(gap)),
+                to: shared(path.slot(gap + 1)),
                 ink: colours.get(path.edge.index()).copied().flatten(),
             });
         }

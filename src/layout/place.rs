@@ -12,7 +12,7 @@
 
 use super::layer::Slot;
 use super::order::{Columns, Hops};
-use crate::graph::{EdgeId, Graph, NodeId};
+use crate::graph::{EdgeId, Graph};
 
 /// Blank rows between two stacked slots.
 const GAP: i32 = 1;
@@ -238,28 +238,14 @@ fn straighten(g: &Graph, columns: &Columns, placed: &mut Placed, merge: Merge) {
 /// row wherever any of them passes and makes the overlap literal — the same
 /// cells, and so one line.
 fn flows(g: &Graph, columns: &Columns) -> Vec<(EdgeId, Vec<(usize, usize)>)> {
+    let rep = super::flow::representative(g);
     let mut flows: Vec<(EdgeId, Vec<(usize, usize)>)> = Vec::new();
-    let mut keys: Vec<(NodeId, &[String])> = Vec::new();
-
     for (edge, cells) in chains(columns) {
-        // Tagged only. Two edges carrying the same tags into one box are one
-        // flow and one line; two untagged ones are two lines that happen to
-        // share a door, and drawing them as one would say something about them
-        // that nothing in the graph supports.
-        let Some(held) = g.edge(edge).filter(|e| !e.tags().is_empty()) else {
-            flows.push((edge, cells));
-            continue;
-        };
-        let key = (held.to(), held.tags());
-        if let Some(at) = keys.iter().position(|k| *k == key)
-            && let Some((id, held)) = flows.get_mut(at)
-        {
-            *id = (*id).min(edge);
-            held.extend(cells);
-            continue;
+        let id = rep.get(edge.index()).copied().unwrap_or(edge);
+        match flows.iter_mut().find(|(held, _)| *held == id) {
+            Some((_, held)) => held.extend(cells),
+            None => flows.push((id, cells)),
         }
-        keys.push(key);
-        flows.push((edge, cells));
     }
     flows
 }
