@@ -225,6 +225,7 @@ mod tests {
             &columns,
             &hops,
             &interiors(g, &acyclic),
+            0,
             place::Merge::Flows,
         );
         let ports = rows(g, &acyclic, &columns, &placed);

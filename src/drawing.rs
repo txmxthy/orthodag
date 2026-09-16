@@ -402,6 +402,34 @@ mod tests {
         assert_eq!(heading(back), Some(Heading::Up));
     }
 
+    /// A fixed width applies to every box, whatever its text.
+    #[test]
+    fn a_box_width_fixes_every_column() {
+        let mut g = Graph::new();
+        let a = g.add_node(Node::new("a"));
+        let b = g.add_node(Node::new("a much longer label than the other"));
+        g.add_edge(a, b);
+
+        let drawing = crate::layout(&g, Options::new().box_width(18));
+        assert!(drawing.boxes().all(|b| b.rect.w == 18), "{drawing:?}");
+        let art = crate::draw_with(&g, Options::new().box_width(18));
+        assert!(art.contains('…'), "the long label is clipped:\n{art}");
+    }
+
+    /// A box height is a floor: a box grows past it when it needs the rows.
+    #[test]
+    fn a_box_height_is_a_floor() {
+        let mut g = Graph::new();
+        let a = g.add_node(Node::new("a"));
+        let tall = g.add_node(Node::new("b").line("1").line("2").line("3").line("4"));
+        g.add_edge(a, tall);
+
+        let drawing = crate::layout(&g, Options::new().box_height(5));
+        let height = |node| drawing.boxed_at(node).map(|b| b.rect.h);
+        assert_eq!(height(a), Some(5));
+        assert_eq!(height(tall), Some(7), "four lines need seven rows");
+    }
+
     /// A cell outside the frame is dropped rather than panicking. A caller's
     /// drawing is not trusted input.
     #[test]

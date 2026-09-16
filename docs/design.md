@@ -223,7 +223,8 @@ pub fn layout(graph: &Graph, options: Options) -> Drawing;
 ```
 
 Each has a `_with` variant accepting `Options`. Options control edge labels,
-crossing style and target width. `layout` takes the same arguments and returns
+crossing style, target width, and a fixed box width or minimum box height.
+`layout` takes the same arguments and returns
 the `Drawing` the library would paint, with its boxes and routes readable, for a
 caller whose boxes are widgets of its own.
 

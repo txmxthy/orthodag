@@ -38,6 +38,10 @@ pub(crate) struct Style {
     pub(crate) cap: usize,
     /// Whether each edge carries its tags.
     pub(crate) labels: bool,
+    /// Every box this wide, when the caller fixed it.
+    pub(crate) box_width: Option<i32>,
+    /// No box shorter than this, when the caller asked.
+    pub(crate) box_height: Option<i32>,
 }
 
 impl Style {
@@ -47,6 +51,8 @@ impl Style {
             gap: MIN_GAP,
             cap: usize::MAX,
             labels: options.labels,
+            box_width: fixed_width(options),
+            box_height: options.box_height.and_then(|h| i32::try_from(h).ok()),
         }
     }
 
@@ -57,6 +63,8 @@ impl Style {
             gap,
             cap,
             labels: options.labels,
+            box_width: fixed_width(options),
+            box_height: options.box_height.and_then(|h| i32::try_from(h).ok()),
         };
         [
             Self::natural(options),
@@ -66,6 +74,13 @@ impl Style {
             rung(3, 6),
         ]
     }
+}
+
+/// A fixed box width the caller asked for, floored at the narrowest box.
+fn fixed_width(options: Options) -> Option<i32> {
+    options
+        .box_width
+        .map(|w| i32::try_from(w).unwrap_or(i32::MAX).max(MIN_WIDTH))
 }
 
 /// The fewest blank columns between one column of boxes and the next, unsqueezed.
@@ -368,6 +383,9 @@ fn back_routes(g: &Graph, acyclic: &Acyclic, boxes: &[Boxed], height: i32) -> (V
 /// One width per column rather than per box, because boxes whose left edges do
 /// not line up read as a ragged margin rather than as a column.
 fn widths(g: &Graph, columns: &Columns, style: Style) -> Vec<i32> {
+    if let Some(fixed) = style.box_width {
+        return vec![fixed; columns.len()];
+    }
     columns
         .iter()
         .map(|slots| {

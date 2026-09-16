@@ -47,6 +47,15 @@ pub struct Options {
     /// too wide, the narrowest attempt is what comes back. Nothing is ever
     /// clipped, because half a box is worse than a wide one.
     pub width: Option<usize>,
+    /// Draw every box this many cells wide, whatever its text.
+    ///
+    /// For a caller whose boxes are widgets of a fixed size. Text that does
+    /// not fit is clipped with an ellipsis, as it is when a drawing is squeezed.
+    pub box_width: Option<usize>,
+    /// Draw no box shorter than this many rows, borders included.
+    ///
+    /// A box grows past it when its text or its flows need more rows.
+    pub box_height: Option<usize>,
 }
 
 impl Options {
@@ -73,6 +82,20 @@ impl Options {
     #[must_use]
     pub fn width(mut self, columns: usize) -> Self {
         self.width = Some(columns);
+        self
+    }
+
+    /// Draws every box this many cells wide.
+    #[must_use]
+    pub fn box_width(mut self, cells: usize) -> Self {
+        self.box_width = Some(cells);
+        self
+    }
+
+    /// Draws no box shorter than this many rows.
+    #[must_use]
+    pub fn box_height(mut self, rows: usize) -> Self {
+        self.box_height = Some(rows);
         self
     }
 }

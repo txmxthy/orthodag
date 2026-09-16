@@ -208,6 +208,7 @@ fn build_metered(
         g,
         hops: &hops,
         interiors: &interiors,
+        floor: style.box_height.unwrap_or(0),
         draw: &draw,
         worth: &worth,
         meter,
@@ -251,6 +252,8 @@ struct Judge<'a> {
     g: &'a Graph,
     hops: &'a order::Hops<'a>,
     interiors: &'a [usize],
+    /// The shortest box the caller will accept.
+    floor: i32,
     draw: &'a dyn Fn(&order::Columns, &place::Placed) -> route::Layout,
     worth: &'a dyn Fn(&route::Layout) -> (usize, i64),
     meter: &'a Meter,
@@ -344,17 +347,21 @@ fn shuffle(judge: &Judge, from: &order::Columns) -> order::Columns {
 /// chooses an order that suits a drawing nobody is going to make.
 fn tried(judge: &Judge, columns: &order::Columns) -> place::Placed {
     let Judge {
-        g, hops, interiors, ..
+        g,
+        hops,
+        interiors,
+        floor,
+        ..
     } = *judge;
     let merged = timed(&judge.meter.place, || {
-        place::place(g, columns, hops, interiors, place::Merge::Flows)
+        place::place(g, columns, hops, interiors, floor, place::Merge::Flows)
     });
     let key = judge.worth_of(columns, &merged);
     if key.0 == 0 {
         return merged;
     }
     let apart = timed(&judge.meter.place, || {
-        place::place(g, columns, hops, interiors, place::Merge::Apart)
+        place::place(g, columns, hops, interiors, floor, place::Merge::Apart)
     });
     if judge.worth_of(columns, &apart) < key {
         apart
@@ -388,10 +395,14 @@ fn swapped(g: &Graph) -> Option<usize> {
 /// is what a local minimum looks like from here.
 fn settle(judge: &Judge, columns: &order::Columns, merge: place::Merge) -> place::Placed {
     let Judge {
-        g, hops, interiors, ..
+        g,
+        hops,
+        interiors,
+        floor,
+        ..
     } = *judge;
     let mut placed = timed(&judge.meter.place, || {
-        place::place(g, columns, hops, interiors, merge)
+        place::place(g, columns, hops, interiors, floor, merge)
     });
     let mut best = judge.worth_of(columns, &placed);
     let Some(passes) = climbed(g) else {
