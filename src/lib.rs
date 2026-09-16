@@ -29,7 +29,7 @@ mod paint;
 mod score;
 
 pub use defect::{Defect, Fault};
-pub use drawing::{Drawing, Rect};
+pub use drawing::{Boxed, Drawing, Heading, Rect, Routed};
 pub use layout::Phases;
 pub use paint::{Part, Span};
 pub use score::Score;
@@ -116,6 +116,15 @@ pub fn score(graph: &Graph) -> Score {
 /// What the drawing of a graph is worth, with options.
 pub fn score_with(graph: &Graph, options: Options) -> Score {
     score::score(graph, &layout::build(graph, options))
+}
+
+/// Lays a graph out and hands back the drawing it would paint.
+///
+/// For a caller whose boxes are widgets of its own: the boxes and lines this
+/// library would draw, in cell coordinates, without a character in them. The
+/// same [`Drawing`] goes back into [`draw_drawing`] unchanged.
+pub fn layout(graph: &Graph, options: Options) -> Drawing {
+    Drawing::from_layout(layout::build(graph, options))
 }
 
 /// Paints a drawing built by the caller, with this library's glyphs.

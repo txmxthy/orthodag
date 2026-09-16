@@ -18,15 +18,7 @@ use crate::colour::Colour;
 /// rather than to a box.
 const BRIDGE: [char; 3] = ['│', '╴', '╶'];
 
-/// Which way an edge is pointing where it arrives.
-///
-/// Forward edges all arrive from the left, so this was a constant until back
-/// edges came up through a lane and needed to point the other way.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Heading {
-    Right,
-    Up,
-}
+pub use crate::drawing::Heading;
 
 impl Heading {
     fn glyph(self) -> char {

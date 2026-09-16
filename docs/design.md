@@ -219,18 +219,21 @@ The main entry points accept a graph and return text, spans or a score:
 pub fn draw(graph: &Graph) -> String;
 pub fn spans(graph: &Graph) -> Vec<Vec<Span>>;
 pub fn score(graph: &Graph) -> Score;
+pub fn layout(graph: &Graph, options: Options) -> Drawing;
 ```
 
 Each has a `_with` variant accepting `Options`. Options control edge labels,
-crossing style and target width.
+crossing style and target width. `layout` takes the same arguments and returns
+the `Drawing` the library would paint, with its boxes and routes readable, for a
+caller whose boxes are widgets of its own.
 
 A `Span` identifies both its palette slot and its part of the drawing. This
 lets a caller style box borders differently from untagged edges even though
 neither has a palette slot. The caller chooses the actual colours.
 
-The internal `Layout` and `Canvas` types remain private. Callers can supply a
-`Drawing` to `score_drawing` or `draw_drawing` when they already have box
-positions and routes, so a drawing from any source is held to the same objective.
+The `Canvas` type remains private. Callers can also build a `Drawing` and hand
+it to `score_drawing` or `draw_drawing` when they already have box positions and
+routes, so a drawing from any source is held to the same objective.
 
 ## 8. Quality requirements
 

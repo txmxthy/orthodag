@@ -7,7 +7,7 @@ mod canvas;
 mod glyph;
 pub(crate) mod grid;
 
-pub(crate) use canvas::{Canvas, Heading};
+pub(crate) use canvas::Canvas;
 pub use canvas::{Part, Span};
 
 use crate::colour;
@@ -31,13 +31,7 @@ pub(crate) fn draw(g: &Graph, layout: &Layout, options: Options) -> Canvas {
         let ink = colours.get(route.edge.index()).copied().flatten();
         canvas.path(&route.points, ink);
         if let Some((x, y)) = route.points.last() {
-            // A forward edge arrives from the left; a back edge comes up out of
-            // its lane. The last segment says which.
-            let facing = match route.points.iter().nth_back(1) {
-                Some(before) if before.0 == *x && before.1 > *y => Heading::Up,
-                _ => Heading::Right,
-            };
-            canvas.head(*x, *y, facing, ink);
+            canvas.head(*x, *y, route.heading(), ink);
         }
     }
 

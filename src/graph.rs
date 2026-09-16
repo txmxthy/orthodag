@@ -15,7 +15,11 @@ pub struct NodeId(u32);
 pub struct EdgeId(u32);
 
 impl NodeId {
-    pub(crate) fn index(self) -> usize {
+    /// The position this id names in its graph's node list.
+    ///
+    /// Ids are indices (ADR 0001): the nth node added has index n, so a caller
+    /// keeping a table per node can key it on this.
+    pub fn index(self) -> usize {
         self.0 as usize
     }
 
@@ -30,7 +34,8 @@ impl NodeId {
 }
 
 impl EdgeId {
-    pub(crate) fn index(self) -> usize {
+    /// The position this id names in its graph's edge list. See [`NodeId::index`].
+    pub fn index(self) -> usize {
         self.0 as usize
     }
 

@@ -21,6 +21,7 @@ use super::order::Columns;
 use super::place::Placed;
 use super::port::Ports;
 use super::track::{Run, Tracks, pack};
+use crate::drawing::Heading;
 use crate::graph::{EdgeId, Graph, NodeId};
 use crate::options::Options;
 
@@ -113,6 +114,15 @@ impl Route {
     /// How many right angles the line turns through.
     pub(crate) fn bends(&self) -> usize {
         self.points.len().saturating_sub(2)
+    }
+
+    /// Which way the arrowhead points: a forward edge arrives from the left, a
+    /// back edge comes up out of its lane. The last segment says which.
+    pub(crate) fn heading(&self) -> Heading {
+        match (self.points.iter().nth_back(1), self.points.last()) {
+            (Some(before), Some(at)) if before.0 == at.0 && before.1 > at.1 => Heading::Up,
+            _ => Heading::Right,
+        }
     }
 }
 

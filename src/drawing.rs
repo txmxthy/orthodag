@@ -37,7 +37,7 @@
 //! top left, both inclusive of the cells the line actually occupies.
 
 use crate::graph::{EdgeId, NodeId};
-use crate::layout::route::{Boxed, Layout, Route};
+use crate::layout::route::{Boxed as Placed, Layout, Route};
 
 /// Where a box sits, in cells.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -59,10 +59,46 @@ impl Rect {
     }
 }
 
+/// Which way an edge is pointing where it arrives.
+///
+/// Forward edges all arrive from the left, so this was a constant until back
+/// edges came up through a lane and needed to point the other way.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Heading {
+    /// Arrives from the left: `▶`.
+    Right,
+    /// Comes up out of a lane below: `▲`.
+    Up,
+}
+
+/// One box of a drawing.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Boxed {
+    /// The node it draws.
+    pub node: NodeId,
+    /// Which column it is in, counting from zero at the left.
+    pub column: usize,
+    /// Where it sits.
+    pub rect: Rect,
+}
+
+/// One edge's line, corner to corner, and which way its arrowhead points.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Routed<'a> {
+    /// The edge it draws.
+    pub edge: EdgeId,
+    /// Every corner, source end first; the last point is the arrowhead's cell.
+    pub points: &'a [(i32, i32)],
+    /// Which way the arrowhead faces.
+    pub heading: Heading,
+}
+
 /// A finished drawing: boxes, orthogonal polylines, and how big the frame is.
 ///
 /// Built up with [`boxed`](Self::boxed) and [`route`](Self::route), then handed
-/// to [`score_drawing`](crate::score_drawing).
+/// to [`score_drawing`](crate::score_drawing); or handed back by
+/// [`layout`](crate::layout) and read through [`boxes`](Self::boxes) and
+/// [`routes`](Self::routes) by a caller that paints its own boxes.
 #[derive(Clone, Debug, Default)]
 pub struct Drawing {
     inner: Layout,
@@ -87,7 +123,7 @@ impl Drawing {
     /// therefore how many bends that edge is allowed: a renderer that does not
     /// think in layers should pass the rank it would have had.
     pub fn boxed(&mut self, node: NodeId, column: usize, at: Rect) -> &mut Self {
-        self.inner.boxes.push(Boxed {
+        self.inner.boxes.push(Placed {
             node,
             column,
             x: at.x,
@@ -118,6 +154,33 @@ impl Drawing {
     /// The frame size this drawing was declared at.
     pub fn size(&self) -> (i32, i32) {
         (self.inner.width, self.inner.height)
+    }
+
+    /// Every box, in the order the nodes were added.
+    pub fn boxes(&self) -> impl Iterator<Item = Boxed> + '_ {
+        self.inner.boxes.iter().map(|b| Boxed {
+            node: b.node,
+            column: b.column,
+            rect: Rect::new(b.x, b.y, b.w, b.h),
+        })
+    }
+
+    /// The box that draws one node.
+    pub fn boxed_at(&self, node: NodeId) -> Option<Boxed> {
+        self.boxes().find(|b| b.node == node)
+    }
+
+    /// Every edge's line, in the order the edges were added.
+    pub fn routes(&self) -> impl Iterator<Item = Routed<'_>> {
+        self.inner.routes.iter().map(|r| Routed {
+            edge: r.edge,
+            points: &r.points,
+            heading: r.heading(),
+        })
+    }
+
+    pub(crate) fn from_layout(inner: Layout) -> Self {
+        Self { inner }
     }
 
     pub(crate) fn layout(&self) -> &Layout {
@@ -292,6 +355,51 @@ mod tests {
         assert_eq!(across(3), "│   │", "the line shows through:\n{art}");
         assert_eq!(across(5), "└───┘", "the bottom border:\n{art}");
         assert!(art.starts_with("    │"), "it should still arrive:\n{art}");
+    }
+
+    /// What the library lays out reads back as what it paints: a box per node,
+    /// a route per edge, and the same picture either way round.
+    #[test]
+    fn a_layout_reads_back_what_paint_draws() {
+        let mut g = Graph::new();
+        let ids: Vec<_> = ["in", "work", "retry"]
+            .iter()
+            .map(|n| g.add_node(Node::new(*n)))
+            .collect();
+        g.add_edge(ids[0], ids[1]);
+        g.add_tagged_edge(ids[1], ids[2], ["t"]);
+        g.add_edge(ids[2], ids[1]);
+        let options = Options::default();
+
+        let drawing = crate::layout(&g, options);
+        assert_eq!(drawing.boxes().count(), 3);
+        assert_eq!(drawing.routes().count(), 3);
+        assert_eq!(
+            drawing.boxes().map(|b| b.node).collect::<Vec<_>>(),
+            ids,
+            "boxes come back in node order"
+        );
+        let first = drawing.boxed_at(ids[0]).map(|b| b.column);
+        assert_eq!(first, Some(0));
+        assert_eq!(
+            crate::draw_drawing(&g, &drawing, options),
+            crate::draw_with(&g, options)
+        );
+    }
+
+    /// A back edge comes up out of its lane, and says so.
+    #[test]
+    fn a_back_edge_reports_heading_up() {
+        let mut g = Graph::new();
+        let a = g.add_node(Node::new("a"));
+        let b = g.add_node(Node::new("b"));
+        let forward = g.add_edge(a, b);
+        let back = g.add_edge(b, a);
+
+        let drawing = crate::layout(&g, Options::default());
+        let heading = |edge| drawing.routes().find(|r| r.edge == edge).map(|r| r.heading);
+        assert_eq!(heading(forward), Some(Heading::Right));
+        assert_eq!(heading(back), Some(Heading::Up));
     }
 
     /// A cell outside the frame is dropped rather than panicking. A caller's
