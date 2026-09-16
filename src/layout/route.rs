@@ -330,7 +330,13 @@ fn back_routes(g: &Graph, acyclic: &Acyclic, boxes: &[Boxed], height: i32) -> (V
             ) else {
                 continue;
             };
-            let (out, back) = (from.x + from.w / 2, to.x + to.w / 2);
+            // A self-loop leaves and returns under the same box; give the two
+            // verticals a column each or the four points fold into one cell.
+            let (out, back) = if from.node == to.node {
+                (from.x + from.w / 2 - 1, from.x + from.w / 2 + 1)
+            } else {
+                (from.x + from.w / 2, to.x + to.w / 2)
+            };
             routes.push(Route {
                 edge: *id,
                 points: collapse(vec![

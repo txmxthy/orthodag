@@ -1,0 +1,10 @@
+---
+source: tests/golden.rs
+assertion_line: 75
+expression: "orthodag::draw(&g)"
+---
+┌────────┐     ┌──────┐
+│ enrich │────▶│ sink │
+└────────┘     └──────┘
+    │ ▲
+    └─┘

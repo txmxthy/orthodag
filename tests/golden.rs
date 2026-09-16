@@ -67,6 +67,15 @@ fn a_cycle_draws_its_back_edge_in_a_lane() {
 }
 
 #[test]
+fn a_self_loop_leaves_and_returns_under_its_box() {
+    let mut g = Graph::new();
+    let ids = nodes(&mut g, &["enrich", "sink"]);
+    g.add_edge(ids[0], ids[0]);
+    g.add_edge(ids[0], ids[1]);
+    insta::assert_snapshot!("self_loop", orthodag::draw(&g));
+}
+
+#[test]
 fn a_lone_node_draws() {
     let mut g = Graph::new();
     g.add_node(Node::new("alone").line("no edges"));
