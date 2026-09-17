@@ -68,6 +68,19 @@ impl Run {
     fn may_share(self, other: Self) -> bool {
         self.clear_of(other) || self.meets(other)
     }
+
+    /// Whether this run has to sit left of `other`.
+    ///
+    /// A run's entry stub runs along its `enter` row from the gap's left edge
+    /// to its track, and its exit stub along its `leave` row from its track to
+    /// the right edge. Two runs of different flows can share a row in only one
+    /// way — one leaves on the row the other enters on — and then the two stubs
+    /// overlap unless the one entering turns first. The overlap is two flows in
+    /// one cell, which is exactly what `score::blends` counts. Runs that are one
+    /// line anyway are free to share.
+    fn precedes(self, other: Self) -> bool {
+        other.leave == self.enter && self.edge != other.edge && !self.meets(other)
+    }
 }
 
 /// Which track each run sits on, and how many tracks each gap needs.
@@ -89,55 +102,73 @@ impl Tracks {
     }
 }
 
-/// Packs every run onto the leftmost track that has room for it.
+/// Orders every run of a gap left to right, then folds neighbours onto one
+/// track where they can share it.
 ///
-/// Runs are taken in a fixed order — top of the drawing first, then by edge —
-/// so the packing is the same every run, and a run only joins a track where it
-/// either misses everything already there or meets it at an end.
+/// The order comes first because it is what decides what crosses what: a
+/// run's stubs cross every track between its own and the gap's edges. Packing
+/// first and ordering the packed tracks afterwards could pin two runs to one
+/// track that the order then had to keep on the wrong side of a third. So each
+/// run is ordered on its own, and only then are neighbours in that order put on
+/// one column of cells when they miss each other or meet at an end — which
+/// keeps every run on the same side of every other, so nothing the order paid
+/// for is lost, and the gap is as narrow as that order allows.
 pub(crate) fn pack(runs: &[Run], gaps: usize) -> Tracks {
-    let mut order: Vec<usize> = (0..runs.len()).collect();
-    order.sort_by_key(|at| runs.get(*at).map(|r| (r.gap, r.lo(), r.hi(), r.edge)));
-
-    let mut of = vec![0; runs.len()];
-    // Per gap, the runs already on each track.
-    let mut taken: Vec<Vec<Vec<usize>>> = vec![Vec::new(); gaps];
-
-    for at in order {
-        let Some(run) = runs.get(at) else { continue };
-        let Some(gap) = taken.get_mut(run.gap) else {
-            continue;
-        };
-
-        let free = gap
-            .iter()
-            .position(|track| track.iter().all(|held| runs[*held].may_share(*run)));
-        let track = free.unwrap_or_else(|| {
-            gap.push(Vec::new());
-            gap.len() - 1
-        });
-        if let Some(held) = gap.get_mut(track) {
+    let mut per_gap: Vec<Vec<usize>> = vec![Vec::new(); gaps];
+    for (at, run) in runs.iter().enumerate() {
+        if let Some(held) = per_gap.get_mut(run.gap) {
             held.push(at);
         }
-        of[at] = track;
     }
 
-    for tracks in &taken {
-        let places = order_tracks(runs, tracks);
-        for (track, held) in tracks.iter().enumerate() {
-            let Some(place) = places.get(track) else {
-                continue;
-            };
-            for at in held {
-                if let Some(slot) = of.get_mut(*at) {
-                    *slot = *place;
-                }
+    let mut of = vec![0; runs.len()];
+    let mut per_gap_count = Vec::with_capacity(gaps);
+    for held in &per_gap {
+        let mut held = held.clone();
+        held.sort_by_key(|at| runs.get(*at).map(|r| (r.lo(), r.hi(), r.edge)));
+
+        // A trunk is one line and is ordered as one: runs of one flow that
+        // meet at an end go on one track before anything is ordered.
+        let mut trunks: Vec<Vec<usize>> = Vec::new();
+        for at in held {
+            let Some(run) = runs.get(at) else { continue };
+            let joined = trunks.iter_mut().find(|track| {
+                track.iter().any(|h| runs[*h].meets(*run))
+                    && track.iter().all(|h| runs[*h].may_share(*run))
+            });
+            match joined {
+                Some(track) => track.push(at),
+                None => trunks.push(vec![at]),
             }
         }
+        let places = order_tracks(runs, &trunks);
+        let mut ordered: Vec<usize> = (0..trunks.len()).collect();
+        ordered.sort_by_key(|slot| places.get(*slot).copied().unwrap_or(0));
+
+        let mut tracks: Vec<Vec<usize>> = Vec::new();
+        for slot in ordered {
+            let trunk = &trunks[slot];
+            let fits = tracks.last().is_some_and(|track| {
+                trunk
+                    .iter()
+                    .all(|at| track.iter().all(|h| runs[*h].may_share(runs[*at])))
+            });
+            match tracks.last_mut() {
+                Some(track) if fits => track.extend(trunk.iter().copied()),
+                _ => tracks.push(trunk.clone()),
+            }
+        }
+        for (track, held) in tracks.iter().enumerate() {
+            for at in held {
+                of[*at] = track;
+            }
+        }
+        per_gap_count.push(tracks.len());
     }
 
     Tracks {
         of,
-        per_gap: taken.iter().map(Vec::len).collect(),
+        per_gap: per_gap_count,
     }
 }
 
@@ -168,12 +199,15 @@ fn order_tracks(runs: &[Run], tracks: &[Vec<usize>]) -> Vec<usize> {
     let mut best_cost = between.cost(&best);
 
     if count <= EXACT {
-        let mut order = best.clone();
-        while next_permutation(&mut order) {
+        let mut order: Vec<usize> = (0..count).collect();
+        loop {
             let now = between.cost(&order);
             if now < best_cost {
                 best_cost = now;
                 best.clone_from(&order);
+            }
+            if !next_permutation(&mut order) {
+                break;
             }
         }
     } else {
@@ -219,7 +253,12 @@ fn order_tracks(runs: &[Run], tracks: &[Vec<usize>]) -> Vec<usize> {
 /// much as the place it begins: first-fit packing order, which is what it used
 /// to begin from, says nothing about left-to-right at all.
 ///
-/// Ties go to the lower track index, so the seed is the same every run.
+/// A track that has to sit left of another ([`Run::precedes`]) is placed
+/// first whatever its reach, so the seed already avoids every landing that can
+/// be avoided; where those constraints form a cycle the track with the fewest
+/// still waiting goes next, and the search inherits the one landing no order
+/// could remove. Ties go to the lower track index, so the seed is the same
+/// every run.
 fn nesting(runs: &[Run], tracks: &[Vec<usize>]) -> Vec<usize> {
     let reach = |track: usize| {
         tracks
@@ -231,9 +270,27 @@ fn nesting(runs: &[Run], tracks: &[Vec<usize>]) -> Vec<usize> {
             .max()
             .unwrap_or(0)
     };
+    let before = |left: usize, right: usize| {
+        left != right
+            && tracks[left]
+                .iter()
+                .any(|l| tracks[right].iter().any(|r| runs[*l].precedes(runs[*r])))
+    };
 
-    let mut order: Vec<usize> = (0..tracks.len()).collect();
-    order.sort_by_key(|track| (std::cmp::Reverse(reach(*track)), *track));
+    let count = tracks.len();
+    let mut order: Vec<usize> = Vec::with_capacity(count);
+    let mut placed = vec![false; count];
+    while order.len() < count {
+        let waiting = |t: usize| (0..count).filter(|l| !placed[*l] && before(*l, t)).count();
+        let Some(next) = (0..count)
+            .filter(|t| !placed[*t])
+            .min_by_key(|t| (waiting(*t), std::cmp::Reverse(reach(*t)), *t))
+        else {
+            break;
+        };
+        placed[next] = true;
+        order.push(next);
+    }
     order
 }
 
@@ -273,12 +330,12 @@ impl Between {
                 // A run on `right`, reached from the left by way of `left`.
                 for at in others {
                     let Some(run) = runs.get(*at) else { continue };
-                    tally(&mut owed, runs, held, run.enter, run.edge);
+                    tally(&mut owed, runs, held, run.enter, *run);
                 }
                 // A run on `left`, leaving to the right across `right`.
                 for at in held {
                     let Some(run) = runs.get(*at) else { continue };
-                    tally(&mut owed, runs, others, run.leave, run.edge);
+                    tally(&mut owed, runs, others, run.leave, *run);
                 }
                 if let Some(slot) = pairs.get_mut(left * count + right) {
                     *slot = owed;
@@ -310,10 +367,14 @@ impl Between {
 }
 
 /// What one row costs against the runs held on one track.
-fn tally(owed: &mut (usize, usize), runs: &[Run], held: &[usize], row: i32, edge: EdgeId) {
+///
+/// Two runs that are one line — the same flow, meeting at an end — do not
+/// cross each other whatever the order puts between them, so they cost
+/// nothing here; the packing folds them onto one track when they are neighbours.
+fn tally(owed: &mut (usize, usize), runs: &[Run], held: &[usize], row: i32, run: Run) {
     for at in held {
         let Some(other) = runs.get(*at) else { continue };
-        if other.edge == edge {
+        if other.edge == run.edge || other.meets(run) {
             continue;
         }
         if row == other.lo() || row == other.hi() {
@@ -597,6 +658,64 @@ mod tests {
         let backward = pack(&[c, b, a], 1);
         assert_eq!(forward.count(0), backward.count(0));
         assert_eq!(forward.of(0), backward.of(2));
+    }
+
+    /// v20->v21 leaves on the row v20->v13 enters on, so v20->v13 has to turn
+    /// first; a second such pair the other way round used to make a
+    /// landing-free order impossible, because first fit had already put the
+    /// two constraints on tracks that wanted opposite orders.
+    #[test]
+    fn a_run_leaving_on_anothers_entry_row_takes_a_track_to_its_right() {
+        let (red, blue) = (Some(Colour::from_slot(0)), Some(Colour::from_slot(1)));
+        let a = inked(0, 9, 8, node(20), node(21), red);
+        let b = inked(1, 8, 5, node(20), node(13), blue);
+        let later = run(2, 14, 12, node(3), node(4));
+        let earlier = run(3, 12, 16, node(5), node(6));
+
+        let t = pack(&[a, b, later, earlier], 1);
+        assert!(t.of(1) < t.of(0), "the run entering on row 8 sits left");
+        assert!(t.of(3) < t.of(2), "the run entering on row 12 sits left");
+    }
+
+    /// v24->v20 leaves on row 11, which v24->v21 enters on.
+    #[test]
+    fn two_flows_out_of_one_box_on_neighbouring_rows_do_not_land() {
+        let (red, blue) = (Some(Colour::from_slot(0)), Some(Colour::from_slot(1)));
+        let a = inked(0, 10, 11, node(24), node(20), red);
+        let b = inked(1, 11, 12, node(24), node(21), blue);
+        let earlier = run(3, 13, 14, node(5), node(6));
+        let later = run(2, 16, 13, node(3), node(4));
+
+        let t = pack(&[a, b, later, earlier], 1);
+        assert!(t.of(1) < t.of(0));
+        assert!(t.of(3) < t.of(2));
+    }
+
+    /// Two boxes on rows a and b feeding two boxes on rows b and a: each run
+    /// wants to sit left of the other, which no order can give. The packing
+    /// still ends, on two tracks, with the one landing placement will have to
+    /// move.
+    #[test]
+    fn a_cycle_of_precedences_still_packs() {
+        let (red, blue) = (Some(Colour::from_slot(0)), Some(Colour::from_slot(1)));
+        let a = inked(0, 3, 7, node(0), node(1), red);
+        let b = inked(1, 7, 3, node(2), node(3), blue);
+        let t = pack(&[a, b], 1);
+        assert_eq!(t.count(0), 2);
+        assert_ne!(t.of(0), t.of(1));
+    }
+
+    /// A run that has to sit right of another still shares a track with a
+    /// third it misses, so the constraint costs no width it need not.
+    #[test]
+    fn a_constrained_run_still_shares_a_track_it_can() {
+        let (red, blue) = (Some(Colour::from_slot(0)), Some(Colour::from_slot(1)));
+        let a = inked(0, 9, 8, node(20), node(21), red);
+        let b = inked(1, 8, 5, node(20), node(13), blue);
+        let far = run(2, 20, 24, node(3), node(4));
+        let t = pack(&[a, b, far], 1);
+        assert!(t.of(1) < t.of(0));
+        assert_eq!(t.count(0), 2);
     }
 
     #[test]
