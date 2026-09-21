@@ -7,8 +7,7 @@ license = "MIT OR Apache-2.0"
 description = "Draw a directed graph as Unicode box-drawing text."
 keywords = ["graph", "dag", "ascii", "terminal", "layout"]
 categories = ["visualization", "command-line-interface"]
-# No remote yet, and crates.io wants a repository. Drop this when there is one.
-publish = false
+repository = "https://github.com/txmxthy/orthodag"
 
 [features]
 default = []
