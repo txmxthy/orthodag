@@ -89,8 +89,8 @@ fn unicode_labels_are_measured_in_terminal_cells() {
     let wide = g.add_node(Node::new("界界界"));
     let combining = g.add_node(Node::new("e\u{301}e\u{301}e\u{301}"));
     let emoji = g.add_node(Node::new("👩‍💻👩‍💻👩‍💻"));
-    g.add_edge(wide, combining);
-    g.add_edge(combining, emoji);
+    g.add_edge(wide, combining).unwrap();
+    g.add_edge(combining, emoji).unwrap();
 
     let drawing = orthodag::layout(&g, Options::default());
 
@@ -104,7 +104,8 @@ fn terminal_controls_are_replaced_before_rendering() {
     let mut g = Graph::new();
     let unsafe_node = g.add_node(Node::new("a\tb\nc\u{1b}\u{85}\u{202e}\u{2066}"));
     let safe_node = g.add_node(Node::new("safe"));
-    g.add_tagged_edge(unsafe_node, safe_node, ["tag\t\u{202e}"]);
+    g.add_tagged_edge(unsafe_node, safe_node, ["tag\t\u{202e}"])
+        .unwrap();
 
     let drawn = orthodag::draw_with(&g, Options::new().labels(true));
 
@@ -130,7 +131,7 @@ fn clipping_keeps_only_whole_graphemes() {
     let mut g = Graph::new();
     let emoji = g.add_node(Node::new("👩‍💻x"));
     let combining = g.add_node(Node::new("e\u{301}xy"));
-    g.add_edge(emoji, combining);
+    g.add_edge(emoji, combining).unwrap();
 
     let drawn = orthodag::draw_with(&g, Options::new().box_width(6));
 
