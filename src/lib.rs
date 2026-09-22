@@ -29,7 +29,9 @@ mod paint;
 mod score;
 
 pub use defect::{Defect, Fault};
-pub use drawing::{Boxed, Drawing, Heading, Rect, Routed};
+pub use drawing::{
+    Boxed, Drawing, DrawingError, Heading, MAX_DRAWING_CELLS, MAX_ROUTE_POINTS, Rect, Routed,
+};
 pub use layout::Phases;
 pub use paint::{Part, Span};
 pub use score::Score;
@@ -141,8 +143,17 @@ pub fn layout(graph: &Graph, options: Options) -> Drawing {
 ///
 /// The graph supplies what goes inside the boxes; the drawing says where they
 /// are.
-pub fn draw_drawing(graph: &Graph, drawing: &Drawing, options: Options) -> String {
-    paint::draw(graph, drawing.layout(), options).to_string()
+///
+/// # Errors
+///
+/// Returns [`DrawingError`] when a box or route does not belong to `graph`.
+pub fn draw_drawing(
+    graph: &Graph,
+    drawing: &Drawing,
+    options: Options,
+) -> Result<String, DrawingError> {
+    drawing.validate(graph)?;
+    Ok(paint::draw(graph, drawing.layout(), options).to_string())
 }
 
 /// What a drawing built by the caller is worth.
@@ -154,8 +165,13 @@ pub fn draw_drawing(graph: &Graph, drawing: &Drawing, options: Options) -> Strin
 /// The graph is still needed — which edges share a source, how many columns an
 /// edge crosses and therefore how many bends it is allowed are facts about the
 /// graph, not about the picture.
-pub fn score_drawing(graph: &Graph, drawing: &Drawing) -> Score {
-    score::score(graph, drawing.layout())
+///
+/// # Errors
+///
+/// Returns [`DrawingError`] when a box or route does not belong to `graph`.
+pub fn score_drawing(graph: &Graph, drawing: &Drawing) -> Result<Score, DrawingError> {
+    drawing.validate(graph)?;
+    Ok(score::score(graph, drawing.layout()))
 }
 
 /// Everything wrong with the drawing of a graph, and who is responsible.
