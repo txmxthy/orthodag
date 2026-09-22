@@ -360,6 +360,7 @@ impl Graph {
             .map(move |index| EdgeId { provenance, index })
     }
 
+    #[cfg(feature = "serde")]
     pub(crate) fn node_id_at(&self, index: usize) -> Option<NodeId> {
         (index < self.nodes.len()).then(|| NodeId {
             provenance: self.provenance,
@@ -367,6 +368,7 @@ impl Graph {
         })
     }
 
+    #[cfg(feature = "serde")]
     pub(crate) fn edge_id_at(&self, index: usize) -> Option<EdgeId> {
         (index < self.edges.len()).then(|| EdgeId {
             provenance: self.provenance,
