@@ -8,10 +8,11 @@
 //!
 //! The supported subset is a `graph` or `flowchart` header with one of Mermaid's
 //! five directions; node declarations with box, round or brace shapes; the five
-//! arrows in [`split_edge`], with optional comma-separated tags; and one level of
-//! `subgraph`. Styling and direction lines are accepted and ignored. Quoted text
-//! recognises `&amp;`, `&quot;`, `&lt;` and `&gt;`; other well-formed entities stay
-//! literal. Malformed declarations and entities are errors.
+//! arrows recognised by `split_edge`, with optional comma-separated tags; and
+//! one level of `subgraph`. Styling and direction lines are accepted and ignored.
+//! Quoted text recognises `&amp;`, `&quot;`, `&lt;` and `&gt;`; other
+//! well-formed entities stay literal. Malformed declarations and entities are
+//! errors.
 //!
 //! Node shapes are read and dropped. A rounded box and a doubled box mean
 //! something to the tool that wrote them, and nothing here: this draws a box.

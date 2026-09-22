@@ -39,6 +39,7 @@ Notable changes, newest first. Versions follow [semver](https://semver.org/).
 - Mermaid in and out behind the `mermaid` feature, DOT out behind `dot`.
 - A seeded generator, a loader for a private corpus, and a gallery page.
 
-Everything the design set out to build exists. What the drawings are worth is a
-separate question: the nine committed fixtures are clean bar one, and the
-generated graphs are not clean at all. See `docs/quality.md`.
+Everything the design set out to build exists. All nine committed fixtures have
+zero vocabulary defects and are protected by a checked-in score baseline.
+Generated and private corpora remain review evidence rather than a guarantee
+for arbitrary graphs. See `docs/quality.md`.

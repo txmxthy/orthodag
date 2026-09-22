@@ -15,7 +15,7 @@ default = []
 mermaid = []
 # Write Mermaid and DOT back out.
 dot = []
-# Serialise the model and the score.
+# Serialise public inputs, drawings and diagnostics.
 serde = ["dep:serde"]
 
 [dependencies]
