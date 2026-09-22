@@ -46,3 +46,15 @@ must_use_candidate = "allow"
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+[[example]]
+name = "compare"
+required-features = ["mermaid"]
+
+[[example]]
+name = "corpus"
+required-features = ["mermaid"]
+
+[[example]]
+name = "why"
+required-features = ["mermaid"]
