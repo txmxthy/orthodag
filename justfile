@@ -46,11 +46,10 @@ bench-fit width="80":
 gallery *flags="":
     cargo run -q --release --features mermaid --example gallery -- {{flags}}
 
-# store today's numbers as the baseline the ratchet compares against
+# rewrite the accepted public-corpus quality baseline
 baseline:
-    @mkdir -p target/quality
-    cargo run -q --example score -- --record > target/quality/baseline.txt
-    @echo "wrote target/quality/baseline.txt"
+    @tmp=$(mktemp); trap 'rm -f "$tmp"' EXIT; { echo 'format=1'; cargo run -q --example score -- --record; } > "$tmp"; mv "$tmp" testdata/quality-baseline.txt
+    @echo "wrote testdata/quality-baseline.txt"
 
 deny:
     cargo deny check

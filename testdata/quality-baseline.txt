@@ -1,0 +1,10 @@
+format=1
+chain bends_fwd=0 bends_skip=0 junctions=0 overlaps=0 cross=0 blends=0 mixed=0 asym=0 detour=0 jogs=0 ink=10 width=30 height=3 total=0
+cycle bends_fwd=0 bends_skip=0 junctions=0 overlaps=0 cross=0 blends=0 mixed=0 asym=0 detour=2 jogs=2 ink=31 width=45 height=5 total=2
+diamond bends_fwd=0 bends_skip=0 junctions=0 overlaps=0 cross=0 blends=0 mixed=0 asym=0 detour=0 jogs=0 ink=22 width=32 height=7 total=0
+fan-in bends_fwd=0 bends_skip=0 junctions=0 overlaps=0 cross=0 blends=0 mixed=0 asym=0 detour=0 jogs=0 ink=15 width=21 height=11 total=0
+fan-out bends_fwd=0 bends_skip=0 junctions=0 overlaps=0 cross=0 blends=0 mixed=0 asym=0 detour=0 jogs=0 ink=19 width=23 height=11 total=0
+ladder bends_fwd=0 bends_skip=0 junctions=0 overlaps=0 cross=2 blends=0 mixed=0 asym=30 detour=6 jogs=2 ink=73 width=40 height=11 total=72
+skip bends_fwd=0 bends_skip=0 junctions=0 overlaps=0 cross=0 blends=0 mixed=0 asym=0 detour=2 jogs=2 ink=42 width=38 height=6 total=2
+two-tags bends_fwd=0 bends_skip=0 junctions=0 overlaps=0 cross=0 blends=0 mixed=0 asym=1 detour=0 jogs=0 ink=46 width=44 height=8 total=2
+wide bends_fwd=0 bends_skip=0 junctions=0 overlaps=0 cross=0 blends=0 mixed=0 asym=0 detour=0 jogs=0 ink=70 width=28 height=23 total=0
