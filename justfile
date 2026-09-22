@@ -32,8 +32,9 @@ bench *flags="--wide":
 # the same, laid out for a terminal 80 columns across
 #
 # A different cost entirely: fitting walks a ladder of ever tighter styles and
-# every rung is a whole layout, ordering search included, though the ordering
-# does not depend on the width. Anything with a window pays this one.
+# draws and scores every rung. Graph analysis and candidate ordering are shared
+# because neither depends on the requested width. Anything with a window pays
+# this one.
 bench-fit width="80":
     @cargo run -q --release --features mermaid --example score -- --wide --fit {{width}} > /dev/null
 

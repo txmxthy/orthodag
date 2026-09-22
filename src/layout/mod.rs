@@ -112,13 +112,12 @@ fn timed<T>(cell: &Cell<Duration>, work: impl FnOnce() -> T) -> T {
 
 /// Lays a graph out and says where the time went.
 pub(crate) fn phases(g: &Graph, options: Options) -> Phases {
+    let began = Instant::now();
     let mut phases = Phases::default();
-    build_metered(
-        g,
-        route::Style::natural(options),
-        &Meter::default(),
-        &mut phases,
-    );
+    let prepared = prepare(g, &mut phases);
+    let meter = Meter::default();
+    build_prepared(g, &prepared, route::Style::natural(options), &meter);
+    finish_phases(&mut phases, &meter, began.elapsed());
     phases
 }
 
@@ -127,8 +126,14 @@ pub(crate) fn phases(g: &Graph, options: Options) -> Phases {
 /// The ordering phase proposes several candidates; each is laid out in full and
 /// scored, and the best drawing wins. See [`build_at`].
 pub(crate) fn build(g: &Graph, options: Options) -> route::Layout {
+    let prepared = prepare(g, &mut Phases::default());
     let Some(target) = options.width.and_then(|w| i32::try_from(w).ok()) else {
-        return build_at(g, route::Style::natural(options));
+        return build_prepared(
+            g,
+            &prepared,
+            route::Style::natural(options),
+            &Meter::default(),
+        );
     };
 
     // Walk the ladder and stop at the first rung that fits. If none do, keep
@@ -136,7 +141,7 @@ pub(crate) fn build(g: &Graph, options: Options) -> route::Layout {
     // clipping one would be worse than admitting it did not fit.
     let mut narrowest: Option<route::Layout> = None;
     for rung in route::Style::ladder(options) {
-        let layout = build_at(g, rung);
+        let layout = build_prepared(g, &prepared, rung, &Meter::default());
         if layout.width <= target {
             return layout;
         }
@@ -150,28 +155,15 @@ pub(crate) fn build(g: &Graph, options: Options) -> route::Layout {
     narrowest.unwrap_or_default()
 }
 
-/// One drawing at one rung of the ladder, chosen by drawing the candidates.
-///
-/// A barycenter sweep reads the layered graph, and the layered graph is not
-/// what a reader sees: it cannot tell that a box hides a crossing, or that two
-/// runs merged into one apparent line. So each ordering it proposed is placed,
-/// routed and scored, and the drawing decides.
-///
-/// Tier before scalar, as everywhere: a candidate with fewer categorical
-/// defects wins whatever it costs on the total, because a glyph that reads
-/// wrong is not worse, it is broken. Ties keep the earliest candidate, which is
-/// the one the sweeps reached first, so the choice is deterministic.
-fn build_at(g: &Graph, style: route::Style) -> route::Layout {
-    build_metered(g, style, &Meter::default(), &mut Phases::default())
+/// The graph-only phases shared by every rung of the fitting ladder.
+struct Prepared {
+    acyclic: acyclic::Acyclic,
+    layered: layer::Layered,
+    interiors: Vec<usize>,
+    proposed: Vec<order::Columns>,
 }
 
-fn build_metered(
-    g: &Graph,
-    style: route::Style,
-    meter: &Meter,
-    phases: &mut Phases,
-) -> route::Layout {
-    let began = Instant::now();
+fn prepare(g: &Graph, phases: &mut Phases) -> Prepared {
     let adj = Adjacency::of(g);
 
     let at = Instant::now();
@@ -186,14 +178,43 @@ fn build_metered(
     let layered = layer::layer(g, &adj, &acyclic, &ranked);
     phases.layer = at.elapsed();
 
-    let hops = order::Hops::of(&layered);
     let interiors = port::interiors(g, &acyclic);
+    let at = Instant::now();
+    let proposed = order::orderings(&layered);
+    phases.order = at.elapsed();
+
+    Prepared {
+        acyclic,
+        layered,
+        interiors,
+        proposed,
+    }
+}
+
+/// One drawing at one rung of the ladder, chosen by drawing the candidates.
+///
+/// A barycenter sweep reads the layered graph, and the layered graph is not
+/// what a reader sees: it cannot tell that a box hides a crossing, or that two
+/// runs merged into one apparent line. So each ordering it proposed is placed,
+/// routed and scored, and the drawing decides.
+///
+/// Tier before scalar, as everywhere: a candidate with fewer categorical
+/// defects wins whatever it costs on the total, because a glyph that reads
+/// wrong is not worse, it is broken. Ties keep the earliest candidate, which is
+/// the one the sweeps reached first, so the choice is deterministic.
+fn build_prepared(
+    g: &Graph,
+    prepared: &Prepared,
+    style: route::Style,
+    meter: &Meter,
+) -> route::Layout {
+    let hops = order::Hops::of(&prepared.layered);
 
     let draw = |columns: &order::Columns, placed: &place::Placed| {
         meter.drawings.set(meter.drawings.get() + 1);
         timed(&meter.route, || {
-            let ports = port::rows(g, &acyclic, columns, placed);
-            route::route(g, &acyclic, columns, placed, &ports, style)
+            let ports = port::rows(g, &prepared.acyclic, columns, placed);
+            route::route(g, &prepared.acyclic, columns, placed, &ports, style)
         })
     };
     // Tier before scalar: a categorical defect is not a large cost, it is a
@@ -208,19 +229,15 @@ fn build_metered(
     let judge = Judge {
         g,
         hops: &hops,
-        interiors: &interiors,
+        interiors: &prepared.interiors,
         floor: style.box_height.unwrap_or(0),
         draw: &draw,
         worth: &worth,
         meter,
     };
 
-    let at = Instant::now();
-    let proposed = order::orderings(&layered);
-    phases.order = at.elapsed();
-
     let mut best: Option<((usize, i64), order::Columns)> = None;
-    for columns in proposed.iter().take(drawn(g)) {
+    for columns in prepared.proposed.iter().take(drawn(g)) {
         let key = judge.worth_of(columns, &lay(&judge, columns));
         if best.as_ref().is_none_or(|(held, _)| key < *held) {
             best = Some((key, columns.clone()));
@@ -232,14 +249,15 @@ fn build_metered(
 
     let columns = shuffle(&judge, &columns);
     let placed = lay(&judge, &columns);
-    let out = draw(&columns, &placed);
+    draw(&columns, &placed)
+}
 
+fn finish_phases(phases: &mut Phases, meter: &Meter, total: Duration) {
     phases.place = meter.place.get();
     phases.route = meter.route.get();
     phases.score = meter.score.get();
     phases.drawings = meter.drawings.get();
-    phases.total = began.elapsed();
-    out
+    phases.total = total;
 }
 
 /// Everything a search needs to try a drawing and put a price on it.
