@@ -20,6 +20,8 @@ serde = ["dep:serde"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"], optional = true }
+unicode-segmentation = "1"
+unicode-width = "0.2"
 
 [dev-dependencies]
 insta = "1.48"

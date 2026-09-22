@@ -14,9 +14,9 @@ orthodag renders a directed graph as Unicode box-drawing text.
 Vertices become boxes, and edges become orthogonal lines that fit a target width,
 against an explicit objective for what a good drawing looks like.
 
-The default build carries no dependencies, and there is never a dependency on a
-terminal library. The output is text and styled spans, and whether those become
-escape codes, HTML or a widget buffer is the caller's business.
+Dependencies are limited to Unicode text measurement; there is never a dependency
+on a terminal library. The output is text and styled spans, and whether those
+become escape codes, HTML or a widget buffer is the caller's business.
 
 > **Status: 0.1.0, early.** Everything documented here works and is tested,
 > though whether the drawings are *good* is a separate question, asked and

@@ -52,27 +52,20 @@ pub(crate) fn draw(g: &Graph, layout: &Layout, options: Options) -> Canvas {
             continue;
         };
         let room = usize::try_from(boxed.w - 4).unwrap_or(0);
-        canvas.write(boxed.x + 2, boxed.y + 1, &clip(node.label(), room));
+        canvas.write(
+            boxed.x + 2,
+            boxed.y + 1,
+            &crate::text::fit(node.label(), room),
+        );
         for (step, line) in node.lines().iter().enumerate() {
             let Ok(step) = i32::try_from(step) else { break };
-            canvas.write(boxed.x + 2, boxed.y + 2 + step, &clip(line, room));
+            canvas.write(
+                boxed.x + 2,
+                boxed.y + 2 + step,
+                &crate::text::fit(line, room),
+            );
         }
     }
 
     canvas
-}
-
-/// Cuts a line of text to fit its box, saying so where it had to.
-///
-/// The box was sized to hold this already unless the drawing is being squeezed,
-/// in which case the reader is better served by an ellipsis than by text
-/// spilling through a border.
-fn clip(text: &str, room: usize) -> String {
-    if text.chars().count() <= room {
-        return text.to_owned();
-    }
-    text.chars()
-        .take(room.saturating_sub(1))
-        .chain(std::iter::once('…'))
-        .collect()
 }

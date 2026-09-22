@@ -8,6 +8,7 @@
 #![allow(clippy::unwrap_used)]
 
 use orthodag::{Crossing, Graph, Node, Options};
+use unicode_width::UnicodeWidthStr;
 
 fn nodes(g: &mut Graph, names: &[&str]) -> Vec<orthodag::NodeId> {
     names.iter().map(|n| g.add_node(Node::new(*n))).collect()
@@ -80,6 +81,61 @@ fn a_lone_node_draws() {
     let mut g = Graph::new();
     g.add_node(Node::new("alone").line("no edges"));
     insta::assert_snapshot!("lone_node", orthodag::draw(&g));
+}
+
+#[test]
+fn unicode_labels_are_measured_in_terminal_cells() {
+    let mut g = Graph::new();
+    let wide = g.add_node(Node::new("界界界"));
+    let combining = g.add_node(Node::new("e\u{301}e\u{301}e\u{301}"));
+    let emoji = g.add_node(Node::new("👩‍💻👩‍💻👩‍💻"));
+    g.add_edge(wide, combining);
+    g.add_edge(combining, emoji);
+
+    let drawing = orthodag::layout(&g, Options::default());
+
+    assert_eq!(drawing.boxed_at(wide).map(|b| b.rect.w), Some(10));
+    assert_eq!(drawing.boxed_at(combining).map(|b| b.rect.w), Some(7));
+    assert_eq!(drawing.boxed_at(emoji).map(|b| b.rect.w), Some(10));
+}
+
+#[test]
+fn terminal_controls_are_replaced_before_rendering() {
+    let mut g = Graph::new();
+    let unsafe_node = g.add_node(Node::new("a\tb\nc\u{1b}\u{85}\u{202e}\u{2066}"));
+    let safe_node = g.add_node(Node::new("safe"));
+    g.add_tagged_edge(unsafe_node, safe_node, ["tag\t\u{202e}"]);
+
+    let drawn = orthodag::draw_with(&g, Options::new().labels(true));
+
+    assert!(drawn.contains("a�b�c����"), "{drawn:?}");
+    assert!(drawn.contains("tag��"), "{drawn:?}");
+    assert!(!drawn.contains(['\t', '\u{1b}', '\u{85}', '\u{202e}', '\u{2066}']));
+}
+
+#[test]
+fn rendered_graphemes_occupy_the_cells_layout_reserved() {
+    let label = "👩‍💻👩‍💻👩‍💻";
+    let mut g = Graph::new();
+    g.add_node(Node::new(label));
+
+    let drawn = orthodag::draw(&g);
+
+    assert!(drawn.contains(label), "{drawn}");
+    assert!(drawn.lines().all(|line| line.width() == 10), "{drawn}");
+}
+
+#[test]
+fn clipping_keeps_only_whole_graphemes() {
+    let mut g = Graph::new();
+    let emoji = g.add_node(Node::new("👩‍💻x"));
+    let combining = g.add_node(Node::new("e\u{301}xy"));
+    g.add_edge(emoji, combining);
+
+    let drawn = orthodag::draw_with(&g, Options::new().box_width(6));
+
+    assert!(!drawn.contains(['👩', '💻']), "{drawn}");
+    assert!(drawn.contains("e\u{301}…"), "{drawn}");
 }
 
 #[test]

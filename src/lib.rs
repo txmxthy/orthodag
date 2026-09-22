@@ -27,6 +27,7 @@ mod layout;
 #[allow(dead_code)]
 mod paint;
 mod score;
+mod text;
 
 pub use defect::{Defect, Fault};
 pub use drawing::{
