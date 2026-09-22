@@ -17,8 +17,8 @@ fn nodes(g: &mut Graph, names: &[&str]) -> Vec<orthodag::NodeId> {
 fn a_chain_draws() {
     let mut g = Graph::new();
     let ids = nodes(&mut g, &["in", "cat", "out"]);
-    g.add_edge(ids[0], ids[1]);
-    g.add_edge(ids[1], ids[2]);
+    g.add_edge(ids[0], ids[1]).unwrap();
+    g.add_edge(ids[1], ids[2]).unwrap();
     insta::assert_snapshot!("chain", orthodag::draw(&g));
 }
 
@@ -27,7 +27,7 @@ fn a_fan_out_draws() {
     let mut g = Graph::new();
     let ids = nodes(&mut g, &["source", "even", "odd", "late"]);
     for target in &ids[1..] {
-        g.add_edge(ids[0], *target);
+        g.add_edge(ids[0], *target).unwrap();
     }
     insta::assert_snapshot!("fan_out", orthodag::draw(&g));
 }
@@ -37,7 +37,7 @@ fn a_fan_in_draws() {
     let mut g = Graph::new();
     let ids = nodes(&mut g, &["even", "odd", "late", "sink"]);
     for source in &ids[..3] {
-        g.add_edge(*source, ids[3]);
+        g.add_edge(*source, ids[3]).unwrap();
     }
     insta::assert_snapshot!("fan_in", orthodag::draw(&g));
 }
@@ -47,12 +47,12 @@ fn a_diamond_with_a_skip_draws() {
     let mut g = Graph::new();
     let ids = nodes(&mut g, &["in", "split", "even", "odd"]);
     let sink = g.add_node(Node::new("sink").line("2 parts"));
-    g.add_edge(ids[0], ids[1]);
-    g.add_edge(ids[1], ids[2]);
-    g.add_edge(ids[1], ids[3]);
-    g.add_edge(ids[2], sink);
-    g.add_edge(ids[3], sink);
-    g.add_edge(ids[0], sink);
+    g.add_edge(ids[0], ids[1]).unwrap();
+    g.add_edge(ids[1], ids[2]).unwrap();
+    g.add_edge(ids[1], ids[3]).unwrap();
+    g.add_edge(ids[2], sink).unwrap();
+    g.add_edge(ids[3], sink).unwrap();
+    g.add_edge(ids[0], sink).unwrap();
     insta::assert_snapshot!("diamond_with_a_skip", orthodag::draw(&g));
 }
 
@@ -60,9 +60,9 @@ fn a_diamond_with_a_skip_draws() {
 fn a_cycle_draws_its_back_edge_in_a_lane() {
     let mut g = Graph::new();
     let ids = nodes(&mut g, &["in", "work", "retry"]);
-    g.add_edge(ids[0], ids[1]);
-    g.add_edge(ids[1], ids[2]);
-    g.add_edge(ids[2], ids[1]);
+    g.add_edge(ids[0], ids[1]).unwrap();
+    g.add_edge(ids[1], ids[2]).unwrap();
+    g.add_edge(ids[2], ids[1]).unwrap();
     insta::assert_snapshot!("cycle", orthodag::draw(&g));
 }
 
@@ -70,8 +70,8 @@ fn a_cycle_draws_its_back_edge_in_a_lane() {
 fn a_self_loop_leaves_and_returns_under_its_box() {
     let mut g = Graph::new();
     let ids = nodes(&mut g, &["enrich", "sink"]);
-    g.add_edge(ids[0], ids[0]);
-    g.add_edge(ids[0], ids[1]);
+    g.add_edge(ids[0], ids[0]).unwrap();
+    g.add_edge(ids[0], ids[1]).unwrap();
     insta::assert_snapshot!("self_loop", orthodag::draw(&g));
 }
 
@@ -88,10 +88,11 @@ fn tags_draw_on_their_edges_when_asked_for() {
     // A branch carrying two tags at once is the case worth a picture: it is one
     // edge, drawn once, captioned with both.
     let ids = nodes(&mut g, &["logs", "level", "warn", "error", "audit"]);
-    g.add_edge(ids[0], ids[1]);
-    g.add_tagged_edge(ids[1], ids[2], ["warn"]);
-    g.add_tagged_edge(ids[1], ids[3], ["error"]);
-    g.add_tagged_edge(ids[1], ids[4], ["warn", "error"]);
+    g.add_edge(ids[0], ids[1]).unwrap();
+    g.add_tagged_edge(ids[1], ids[2], ["warn"]).unwrap();
+    g.add_tagged_edge(ids[1], ids[3], ["error"]).unwrap();
+    g.add_tagged_edge(ids[1], ids[4], ["warn", "error"])
+        .unwrap();
     insta::assert_snapshot!(
         "labels",
         orthodag::draw_with(&g, Options::new().labels(true))
@@ -102,7 +103,7 @@ fn tags_draw_on_their_edges_when_asked_for() {
 fn labels_are_off_unless_asked_for() {
     let mut g = Graph::new();
     let ids = nodes(&mut g, &["a", "b"]);
-    g.add_tagged_edge(ids[0], ids[1], ["a-tag"]);
+    g.add_tagged_edge(ids[0], ids[1], ["a-tag"]).unwrap();
     assert!(!orthodag::draw(&g).contains("a-tag"));
     assert!(orthodag::draw_with(&g, Options::new().labels(true)).contains("a-tag"));
 }
@@ -126,7 +127,7 @@ fn a_crossing_can_read_as_a_bridge() {
         (5, 6),
         (0, 6),
     ] {
-        g.add_edge(ids[from], ids[to]);
+        g.add_edge(ids[from], ids[to]).unwrap();
     }
     insta::assert_snapshot!(
         "bridge",
@@ -154,8 +155,8 @@ fn a_drawing_shrinks_to_fit_a_width() {
             "and-a-long-sink-name-too",
         ],
     );
-    g.add_edge(ids[0], ids[1]);
-    g.add_edge(ids[1], ids[2]);
+    g.add_edge(ids[0], ids[1]).unwrap();
+    g.add_edge(ids[1], ids[2]).unwrap();
 
     let natural = orthodag::draw(&g);
     assert!(columns(&natural) > 60);
@@ -177,7 +178,7 @@ fn a_width_nothing_can_reach_gives_the_narrowest_rather_than_a_clipped_drawing()
         &mut g,
         &["a-very-long-source-name", "and-a-long-sink-name-too"],
     );
-    g.add_edge(ids[0], ids[1]);
+    g.add_edge(ids[0], ids[1]).unwrap();
 
     let floor = orthodag::draw_with(&g, Options::new().width(4));
     assert!(
@@ -200,7 +201,7 @@ fn a_width_nothing_can_reach_gives_the_narrowest_rather_than_a_clipped_drawing()
 fn asking_for_more_room_than_it_needs_changes_nothing() {
     let mut g = Graph::new();
     let ids = nodes(&mut g, &["in", "out"]);
-    g.add_edge(ids[0], ids[1]);
+    g.add_edge(ids[0], ids[1]).unwrap();
     assert_eq!(
         orthodag::draw(&g),
         orthodag::draw_with(&g, Options::new().width(400))

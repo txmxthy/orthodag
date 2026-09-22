@@ -248,11 +248,11 @@ mod tests {
             .collect();
         let z = g.add_node(Node::new("z"));
 
-        g.add_tagged_edge(s, chain[0], ["t1"]);
-        g.add_tagged_edge(chain[0], chain[1], ["t2"]);
-        g.add_tagged_edge(chain[1], chain[2], ["t3"]);
-        let near = g.add_tagged_edge(chain[2], z, ["t4"]);
-        let far = g.add_tagged_edge(s, z, ["x1"]);
+        g.add_tagged_edge(s, chain[0], ["t1"]).unwrap();
+        g.add_tagged_edge(chain[0], chain[1], ["t2"]).unwrap();
+        g.add_tagged_edge(chain[1], chain[2], ["t3"]).unwrap();
+        let near = g.add_tagged_edge(chain[2], z, ["t4"]).unwrap();
+        let far = g.add_tagged_edge(s, z, ["x1"]).unwrap();
 
         let (_, _, _, ports) = build(&g);
         assert!(
@@ -271,7 +271,7 @@ mod tests {
         let mut g = Graph::new();
         let a = g.add_node(Node::new("a"));
         let b = g.add_node(Node::new("b"));
-        g.add_edge(a, b);
+        g.add_edge(a, b).unwrap();
         let adj = Adjacency::of(&g);
         assert_eq!(interiors(&g, &back_edges(&g, &adj)), [1, 1]);
     }
@@ -282,8 +282,8 @@ mod tests {
         let a = g.add_node(Node::new("a"));
         let x = g.add_node(Node::new("x"));
         let y = g.add_node(Node::new("y"));
-        g.add_tagged_edge(a, x, ["even"]);
-        g.add_tagged_edge(a, y, ["odd"]);
+        g.add_tagged_edge(a, x, ["even"]).unwrap();
+        g.add_tagged_edge(a, y, ["odd"]).unwrap();
         let adj = Adjacency::of(&g);
         assert_eq!(interiors(&g, &back_edges(&g, &adj))[0], 2);
     }
@@ -294,8 +294,8 @@ mod tests {
         let a = g.add_node(Node::new("a"));
         let x = g.add_node(Node::new("x"));
         let y = g.add_node(Node::new("y"));
-        let one = g.add_tagged_edge(a, x, ["even"]);
-        let two = g.add_tagged_edge(a, y, ["even"]);
+        let one = g.add_tagged_edge(a, x, ["even"]).unwrap();
+        let two = g.add_tagged_edge(a, y, ["even"]).unwrap();
         let adj = Adjacency::of(&g);
         assert_eq!(interiors(&g, &back_edges(&g, &adj))[0], 1);
 
@@ -309,8 +309,8 @@ mod tests {
         let a = g.add_node(Node::new("a"));
         let x = g.add_node(Node::new("x"));
         let y = g.add_node(Node::new("y"));
-        let even = g.add_tagged_edge(a, x, ["even"]);
-        let odd = g.add_tagged_edge(a, y, ["odd"]);
+        let even = g.add_tagged_edge(a, x, ["even"]).unwrap();
+        let odd = g.add_tagged_edge(a, y, ["odd"]).unwrap();
 
         let (_, _, _, ports) = build(&g);
         assert_ne!(ports.exit(even), ports.exit(odd));
@@ -322,8 +322,8 @@ mod tests {
         let mut g = Graph::new();
         let a = g.add_node(Node::new("a"));
         let b = g.add_node(Node::new("b"));
-        g.add_tagged_edge(a, b, ["down"]);
-        g.add_tagged_edge(b, a, ["up"]);
+        g.add_tagged_edge(a, b, ["down"]).unwrap();
+        g.add_tagged_edge(b, a, ["up"]).unwrap();
         let adj = Adjacency::of(&g);
         assert_eq!(interiors(&g, &back_edges(&g, &adj)), [1, 1]);
     }
@@ -334,7 +334,7 @@ mod tests {
         let a = g.add_node(Node::new("a"));
         for name in ["p", "q", "r", "s"] {
             let t = g.add_node(Node::new(name));
-            g.add_tagged_edge(a, t, [name]);
+            g.add_tagged_edge(a, t, [name]).unwrap();
         }
         let (_, columns, placed, ports) = build(&g);
         let (column, at) = find(&columns, Slot::Node(a)).expect("a is placed");

@@ -36,7 +36,7 @@ pub use score::Score;
 
 pub use colour::{Colour, PALETTE};
 
-pub use graph::{Edge, EdgeId, Graph, Node, NodeId};
+pub use graph::{Edge, EdgeId, Graph, GraphError, Node, NodeId};
 pub use options::{Crossing, Options};
 
 /// Draws a graph as box-drawing text.
@@ -46,12 +46,15 @@ pub use options::{Crossing, Options};
 /// ```
 /// use orthodag::{Graph, Node};
 ///
+/// # fn main() -> Result<(), orthodag::GraphError> {
 /// let mut g = Graph::new();
 /// let a = g.add_node(Node::new("a"));
 /// let b = g.add_node(Node::new("b"));
-/// g.add_edge(a, b);
+/// g.add_edge(a, b)?;
 ///
 /// print!("{}", orthodag::draw(&g));
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// This is not the shape the surface ends up in. `docs/design.md` has layout,
@@ -79,10 +82,11 @@ pub fn draw_with(graph: &Graph, options: Options) -> String {
 /// ```
 /// use orthodag::{Graph, Node};
 ///
+/// # fn main() -> Result<(), orthodag::GraphError> {
 /// let mut g = Graph::new();
 /// let a = g.add_node(Node::new("a"));
 /// let b = g.add_node(Node::new("b"));
-/// g.add_tagged_edge(a, b, ["even"]);
+/// g.add_tagged_edge(a, b, ["even"])?;
 ///
 /// for row in orthodag::spans(&g) {
 ///     for span in row {
@@ -93,6 +97,8 @@ pub fn draw_with(graph: &Graph, options: Options) -> String {
 ///     }
 ///     println!();
 /// }
+/// # Ok(())
+/// # }
 /// ```
 pub fn spans(graph: &Graph) -> Vec<Vec<Span>> {
     spans_with(graph, Options::default())

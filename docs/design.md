@@ -42,8 +42,9 @@ additional lines of text. Each edge has a source, a target and a set of tags.
 Callers build graphs with `add_node`, `add_edge` and `add_tagged_edge`; the core
 model does not require a parser.
 
-`NodeId` and `EdgeId` wrap `u32` indices into those vectors. Their limitations are
-documented in [ADR 1](adr/0001-ids-are-indices.md).
+`NodeId` and `EdgeId` combine dense `u32` indices with opaque process-local graph
+identity. Their semantics are documented in
+[ADR 1](adr/0001-ids-are-indices.md).
 
 Tags identify logical flows and determine palette slots. When tagged edges have
 the same tag set and target, their long sections can share placeholder rows and

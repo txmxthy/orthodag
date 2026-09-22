@@ -74,7 +74,7 @@ mod tests {
         let a = g.add_node(Node::new("a"));
         let b = g.add_node(Node::new("b"));
         for set in tags {
-            g.add_tagged_edge(a, b, set.iter().copied());
+            g.add_tagged_edge(a, b, set.iter().copied()).unwrap();
         }
         g
     }
@@ -84,7 +84,7 @@ mod tests {
         let mut g = Graph::new();
         let a = g.add_node(Node::new("a"));
         let b = g.add_node(Node::new("b"));
-        g.add_edge(a, b);
+        g.add_edge(a, b).unwrap();
         assert_eq!(of(&g), [None]);
     }
 

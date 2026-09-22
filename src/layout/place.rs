@@ -513,7 +513,7 @@ mod tests {
         let mut g = Graph::new();
         let ids: Vec<_> = nodes.iter().map(|n| g.add_node(Node::new(*n))).collect();
         for &(a, b) in edges {
-            g.add_edge(ids[a], ids[b]);
+            g.add_edge(ids[a], ids[b]).unwrap();
         }
         let adj = Adjacency::of(&g);
         let acyclic = back_edges(&g, &adj);
@@ -631,7 +631,7 @@ mod tests {
         let mut g = Graph::new();
         let short = g.add_node(Node::new("short"));
         let tall = g.add_node(Node::new("tall").line("one").line("two"));
-        g.add_edge(short, tall);
+        g.add_edge(short, tall).unwrap();
         let adj = Adjacency::of(&g);
         let acyclic = back_edges(&g, &adj);
         let ranked = rank(&g, &adj, &acyclic);
@@ -708,13 +708,13 @@ mod tests {
             .iter()
             .map(|n| g.add_node(Node::new(*n)))
             .collect();
-        g.add_edge(ids[0], ids[1]);
-        g.add_edge(ids[1], ids[2]);
-        g.add_edge(ids[2], ids[3]);
-        g.add_edge(ids[3], ids[4]);
+        g.add_edge(ids[0], ids[1]).unwrap();
+        g.add_edge(ids[1], ids[2]).unwrap();
+        g.add_edge(ids[2], ids[3]).unwrap();
+        g.add_edge(ids[3], ids[4]).unwrap();
         // Both skip, both carry `t`, both end at z.
-        g.add_tagged_edge(ids[1], ids[4], ["t"]);
-        g.add_tagged_edge(ids[2], ids[4], ["t"]);
+        g.add_tagged_edge(ids[1], ids[4], ["t"]).unwrap();
+        g.add_tagged_edge(ids[2], ids[4], ["t"]).unwrap();
 
         let adj = Adjacency::of(&g);
         let acyclic = back_edges(&g, &adj);
@@ -784,7 +784,7 @@ mod tests {
             .map(|i| g.add_node(Node::new(format!("n{i}"))))
             .collect();
         for &(a, b) in &[(0, 3), (1, 4), (2, 3), (0, 5), (3, 6), (4, 6), (5, 6)] {
-            g.add_edge(ids[a], ids[b]);
+            g.add_edge(ids[a], ids[b]).unwrap();
         }
         let adj = Adjacency::of(&g);
         let acyclic = back_edges(&g, &adj);

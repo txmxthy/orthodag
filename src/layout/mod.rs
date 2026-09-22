@@ -511,7 +511,8 @@ mod tests {
             } else {
                 (a.min(b), a.max(b))
             };
-            g.add_tagged_edge(ids[from], ids[to], [format!("t{}", next() % 4)]);
+            g.add_tagged_edge(ids[from], ids[to], [format!("t{}", next() % 4)])
+                .unwrap();
         }
         g
     }
@@ -605,7 +606,7 @@ mod tests {
             .map(|i| g.add_node(Node::new(format!("n{i}"))))
             .collect();
         for &(a, b) in &[(0, 1), (1, 2), (2, 1)] {
-            g.add_edge(ids[a], ids[b]);
+            g.add_edge(ids[a], ids[b]).unwrap();
         }
         let drawing = build(&g, Options::default());
         assert_eq!(drawing.routes.len(), 3, "the loop is drawn too");

@@ -39,10 +39,10 @@ mod tests {
         let a = g.add_node(Node::new("a"));
         let b = g.add_node(Node::new("b"));
         let c = g.add_node(Node::new("c"));
-        let first = g.add_tagged_edge(a, c, ["t"]);
-        let plain = g.add_edge(a, b);
-        let second = g.add_tagged_edge(b, c, ["t"]);
-        let other = g.add_tagged_edge(b, c, ["u"]);
+        let first = g.add_tagged_edge(a, c, ["t"]).unwrap();
+        let plain = g.add_edge(a, b).unwrap();
+        let second = g.add_tagged_edge(b, c, ["t"]).unwrap();
+        let other = g.add_tagged_edge(b, c, ["u"]).unwrap();
 
         assert_eq!(representative(&g), vec![first, plain, first, other]);
         assert_eq!(representative(&g)[second.index()], first);

@@ -132,7 +132,7 @@ use orthodag::{Graph, Node};
 let mut g = Graph::new();
 let a = g.add_node(Node::new("read"));
 let b = g.add_node(Node::new("parse"));
-g.add_edge(a, b);
+g.add_edge(a, b).expect("both nodes belong to this graph");
 
 print!("{}", orthodag::draw(&g));
 ```

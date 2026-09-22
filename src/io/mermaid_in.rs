@@ -11,7 +11,7 @@
 
 use std::fmt;
 
-use crate::graph::{Graph, Node, NodeId};
+use crate::graph::{Graph, GraphError, Node, NodeId};
 
 /// Why a document could not be read.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -120,13 +120,13 @@ impl Sheet {
     ///
     /// Mermaid lets a node be introduced by an edge and labelled later, so a
     /// later label replaces a placeholder one.
-    fn node(&mut self, id: &str, label: Option<&str>) -> NodeId {
+    fn node(&mut self, id: &str, label: Option<&str>) -> Result<NodeId, GraphError> {
         if let Some((_, held)) = self.named.iter().find(|(name, _)| name == id) {
             let held = *held;
             if let Some(label) = label {
-                self.graph.relabel(held, label);
+                self.graph.relabel(held, label)?;
             }
-            return held;
+            return Ok(held);
         }
         // A label written with breaks in it comes back as a headline and the
         // lines under it, which is how it went out.
@@ -138,7 +138,7 @@ impl Sheet {
         }
         let node = self.graph.add_node(node);
         self.named.push((id.to_owned(), node));
-        node
+        Ok(node)
     }
 }
 
@@ -168,9 +168,12 @@ fn read(sheet: &mut Sheet, line: &str) -> Option<()> {
     if let Some((from, arrow, to)) = split_edge(line) {
         let (from_id, from_label) = declaration(from);
         let (to_id, to_label) = declaration(to);
-        let source = sheet.node(from_id, from_label);
-        let target = sheet.node(to_id, to_label);
-        sheet.graph.add_tagged_edge(source, target, tags(arrow));
+        let source = sheet.node(from_id, from_label).ok()?;
+        let target = sheet.node(to_id, to_label).ok()?;
+        sheet
+            .graph
+            .add_tagged_edge(source, target, tags(arrow))
+            .ok()?;
         return Some(());
     }
 
@@ -179,7 +182,7 @@ fn read(sheet: &mut Sheet, line: &str) -> Option<()> {
     if id.is_empty() || id.contains(char::is_whitespace) {
         return None;
     }
-    sheet.node(id, label);
+    sheet.node(id, label).ok()?;
     Some(())
 }
 

@@ -56,7 +56,7 @@ mod tests {
         let mut g = Graph::new();
         let a = g.add_node(Node::new("in"));
         let b = g.add_node(Node::new("out"));
-        g.add_edge(a, b);
+        g.add_edge(a, b).unwrap();
         let written = to_dot(&g);
         assert!(written.starts_with("digraph {\n  rankdir=LR;"), "{written}");
         assert!(written.contains("n0 [label=\"in\"];"));
@@ -69,7 +69,7 @@ mod tests {
         let mut g = Graph::new();
         let a = g.add_node(Node::new("a"));
         let b = g.add_node(Node::new("b"));
-        g.add_tagged_edge(a, b, ["odd", "late"]);
+        g.add_tagged_edge(a, b, ["odd", "late"]).unwrap();
         assert!(to_dot(&g).contains("n0 -> n1 [label=\"late, odd\"];"));
     }
 

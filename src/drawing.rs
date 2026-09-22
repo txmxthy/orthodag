@@ -12,10 +12,11 @@
 //! ```
 //! use orthodag::{Drawing, Graph, Node, Rect};
 //!
+//! # fn main() -> Result<(), orthodag::GraphError> {
 //! let mut g = Graph::new();
 //! let a = g.add_node(Node::new("a"));
 //! let b = g.add_node(Node::new("b"));
-//! let edge = g.add_edge(a, b);
+//! let edge = g.add_edge(a, b)?;
 //!
 //! let mut drawing = Drawing::new(20, 3);
 //! drawing.boxed(a, 0, Rect::new(0, 0, 5, 3));
@@ -24,6 +25,8 @@
 //!
 //! // A straight edge between two boxes: nothing to charge for.
 //! assert_eq!(orthodag::score_drawing(&g, &drawing).total, 0);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # What is not checked
@@ -201,7 +204,7 @@ mod tests {
         let mut g = Graph::new();
         let a = g.add_node(Node::new("a"));
         let b = g.add_node(Node::new("b"));
-        let edge = g.add_edge(a, b);
+        let edge = g.add_edge(a, b).unwrap();
 
         let mut drawing = Drawing::new(20, 3);
         drawing.boxed(a, 0, Rect::new(0, 0, 5, 3));
@@ -222,7 +225,7 @@ mod tests {
         let mut g = Graph::new();
         let a = g.add_node(Node::new("a"));
         let b = g.add_node(Node::new("b"));
-        let edge = g.add_edge(a, b);
+        let edge = g.add_edge(a, b).unwrap();
 
         let mut drawing = Drawing::new(20, 6);
         drawing.boxed(a, 0, Rect::new(0, 0, 5, 3));
@@ -243,7 +246,7 @@ mod tests {
         let mut g = Graph::new();
         let a = g.add_node(Node::new("a"));
         let b = g.add_node(Node::new("b"));
-        let edge = g.add_edge(a, b);
+        let edge = g.add_edge(a, b).unwrap();
 
         let boxes = |d: &mut Drawing| {
             d.boxed(a, 0, Rect::new(0, 0, 5, 3));
@@ -277,8 +280,8 @@ mod tests {
             .iter()
             .map(|n| g.add_node(Node::new(*n)))
             .collect();
-        let across = g.add_edge(ids[0], ids[1]);
-        let down = g.add_edge(ids[2], ids[3]);
+        let across = g.add_edge(ids[0], ids[1]).unwrap();
+        let down = g.add_edge(ids[2], ids[3]).unwrap();
 
         let mut drawing = Drawing::new(9, 5);
         drawing.boxed(ids[0], 0, Rect::new(0, 1, 3, 3));
@@ -306,8 +309,8 @@ mod tests {
             .iter()
             .map(|n| g.add_node(Node::new(*n)))
             .collect();
-        let up = g.add_edge(ids[0], ids[1]);
-        let down = g.add_edge(ids[0], ids[2]);
+        let up = g.add_edge(ids[0], ids[1]).unwrap();
+        let down = g.add_edge(ids[0], ids[2]).unwrap();
 
         let mut drawing = Drawing::new(9, 5);
         drawing.boxed(ids[0], 0, Rect::new(0, 1, 3, 3));
@@ -335,7 +338,7 @@ mod tests {
             .iter()
             .map(|n| g.add_node(Node::new(*n)))
             .collect();
-        let beneath = g.add_tagged_edge(ids[0], ids[1], ["t"]);
+        let beneath = g.add_tagged_edge(ids[0], ids[1], ["t"]).unwrap();
 
         let mut drawing = Drawing::new(9, 7);
         drawing.boxed(ids[2], 0, Rect::new(2, 1, 5, 5));
@@ -366,9 +369,9 @@ mod tests {
             .iter()
             .map(|n| g.add_node(Node::new(*n)))
             .collect();
-        g.add_edge(ids[0], ids[1]);
-        g.add_tagged_edge(ids[1], ids[2], ["t"]);
-        g.add_edge(ids[2], ids[1]);
+        g.add_edge(ids[0], ids[1]).unwrap();
+        g.add_tagged_edge(ids[1], ids[2], ["t"]).unwrap();
+        g.add_edge(ids[2], ids[1]).unwrap();
         let options = Options::default();
 
         let drawing = crate::layout(&g, options);
@@ -393,8 +396,8 @@ mod tests {
         let mut g = Graph::new();
         let a = g.add_node(Node::new("a"));
         let b = g.add_node(Node::new("b"));
-        let forward = g.add_edge(a, b);
-        let back = g.add_edge(b, a);
+        let forward = g.add_edge(a, b).unwrap();
+        let back = g.add_edge(b, a).unwrap();
 
         let drawing = crate::layout(&g, Options::default());
         let heading = |edge| drawing.routes().find(|r| r.edge == edge).map(|r| r.heading);
@@ -408,7 +411,7 @@ mod tests {
         let mut g = Graph::new();
         let a = g.add_node(Node::new("a"));
         let b = g.add_node(Node::new("a much longer label than the other"));
-        g.add_edge(a, b);
+        g.add_edge(a, b).unwrap();
 
         let drawing = crate::layout(&g, Options::new().box_width(18));
         assert!(drawing.boxes().all(|b| b.rect.w == 18), "{drawing:?}");
@@ -422,7 +425,7 @@ mod tests {
         let mut g = Graph::new();
         let a = g.add_node(Node::new("a"));
         let tall = g.add_node(Node::new("b").line("1").line("2").line("3").line("4"));
-        g.add_edge(a, tall);
+        g.add_edge(a, tall).unwrap();
 
         let drawing = crate::layout(&g, Options::new().box_height(5));
         let height = |node| drawing.boxed_at(node).map(|b| b.rect.h);
@@ -437,7 +440,7 @@ mod tests {
         let mut g = Graph::new();
         let a = g.add_node(Node::new("a"));
         let b = g.add_node(Node::new("b"));
-        let edge = g.add_edge(a, b);
+        let edge = g.add_edge(a, b).unwrap();
 
         let mut drawing = Drawing::new(4, 2);
         drawing.boxed(a, 0, Rect::new(0, 0, 2, 2));
