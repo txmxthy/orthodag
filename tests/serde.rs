@@ -59,6 +59,22 @@ fn options_and_scores_use_stable_snake_case_fields() {
 }
 
 #[test]
+fn options_and_scores_default_fields_missing_from_older_data() {
+    assert_eq!(
+        serde_json::from_str::<Options>("{}").unwrap(),
+        Options::default()
+    );
+    assert_eq!(
+        serde_json::from_str::<Options>(r#"{"labels":true}"#).unwrap(),
+        Options::default().labels(true)
+    );
+    assert_eq!(
+        serde_json::from_str::<Score>("{}").unwrap(),
+        Score::default()
+    );
+}
+
+#[test]
 fn a_drawing_rebinds_to_and_validates_against_its_graph() {
     let original = graph();
     let drawing = layout(&original, Options::default());
@@ -101,6 +117,40 @@ fn invalid_drawing_geometry_and_unknown_ids_are_rejected_on_decode() {
     let mut deserializer = serde_json::Deserializer::from_str(unknown);
     let error = Drawing::deserialize_with(&graph, &mut deserializer).unwrap_err();
     assert!(error.to_string().contains("node index 9"));
+}
+
+#[test]
+fn oversized_route_data_is_rejected_during_decode() {
+    let graph = graph();
+    let points = std::iter::repeat_n("[0,0]", orthodag::MAX_ROUTE_POINTS + 1)
+        .collect::<Vec<_>>()
+        .join(",");
+    let json = format!(
+        r#"{{"width":4,"height":4,"boxes":[],"routes":[{{"edge":0,"points":[{points}]}}]}}"#
+    );
+    let mut deserializer = serde_json::Deserializer::from_str(&json);
+    let error = Drawing::deserialize_with(&graph, &mut deserializer).unwrap_err();
+
+    assert!(error.to_string().contains("route points"));
+    assert!(error.to_string().contains("limit"));
+}
+
+#[test]
+fn aggregate_route_data_is_bounded_during_decode() {
+    let graph = graph();
+    let points = std::iter::repeat_n("[0,0]", orthodag::MAX_ROUTE_POINTS)
+        .collect::<Vec<_>>()
+        .join(",");
+    let route = format!(r#"{{"edge":0,"points":[{points}]}}"#);
+    let routes = std::iter::repeat_n(route.as_str(), 65)
+        .collect::<Vec<_>>()
+        .join(",");
+    let json = format!(r#"{{"width":4,"height":4,"boxes":[],"routes":[{routes}]}}"#);
+    let mut deserializer = serde_json::Deserializer::from_str(&json);
+    let error = Drawing::deserialize_with(&graph, &mut deserializer).unwrap_err();
+
+    assert!(error.to_string().contains("drawing route points"));
+    assert!(error.to_string().contains("limit"));
 }
 
 #[test]

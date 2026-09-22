@@ -45,8 +45,8 @@ pub const MAX_DRAWING_CELLS: u64 = 4_000_000;
 /// The most corners accepted in one caller-provided route.
 pub const MAX_ROUTE_POINTS: usize = 4_096;
 
-const MAX_DRAWING_ITEMS: usize = 65_536;
-const MAX_DRAWING_ROUTE_POINTS: usize = 262_144;
+pub(crate) const MAX_DRAWING_ITEMS: usize = 65_536;
+pub(crate) const MAX_DRAWING_ROUTE_POINTS: usize = 262_144;
 const MAX_DRAWING_ROUTE_CELLS: u64 = 8_000_000;
 
 /// Why caller-provided drawing geometry was rejected.

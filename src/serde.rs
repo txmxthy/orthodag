@@ -1,9 +1,67 @@
 //! Stable wire representations for public values.
 
-use ::serde::de::Error as _;
+use std::fmt;
+use std::marker::PhantomData;
+
+use ::serde::de::{Error as _, SeqAccess, Visitor};
 use ::serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::MAX_ROUTE_POINTS;
+use crate::drawing::{MAX_DRAWING_ITEMS, MAX_DRAWING_ROUTE_POINTS};
 use crate::{Defect, Drawing, Graph, Node, Rect};
+
+fn deserialize_bounded_vec<'de, D, T, const N: usize>(
+    deserializer: D,
+    name: &'static str,
+) -> Result<Vec<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    struct BoundedVecVisitor<T, const N: usize> {
+        name: &'static str,
+        marker: PhantomData<T>,
+    }
+
+    impl<'de, T, const N: usize> Visitor<'de> for BoundedVecVisitor<T, N>
+    where
+        T: Deserialize<'de>,
+    {
+        type Value = Vec<T>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(formatter, "at most {N} {}", self.name)
+        }
+
+        fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            if sequence.size_hint().is_some_and(|length| length > N) {
+                return Err(A::Error::custom(format_args!(
+                    "too many {}: limit is {N}",
+                    self.name
+                )));
+            }
+            let mut values = Vec::with_capacity(sequence.size_hint().unwrap_or(0).min(N));
+            while let Some(value) = sequence.next_element()? {
+                if values.len() == N {
+                    return Err(A::Error::custom(format_args!(
+                        "too many {}: limit is {N}",
+                        self.name
+                    )));
+                }
+                values.push(value);
+            }
+            Ok(values)
+        }
+    }
+
+    deserializer.deserialize_seq(BoundedVecVisitor::<T, N> {
+        name,
+        marker: PhantomData,
+    })
+}
 
 #[derive(Serialize)]
 struct NodeRef<'a> {
@@ -117,15 +175,81 @@ struct BoxWire {
 #[derive(Serialize, Deserialize)]
 struct RouteWire {
     edge: usize,
+    #[serde(deserialize_with = "deserialize_route_points")]
     points: Vec<(i32, i32)>,
+}
+
+fn deserialize_route_points<'de, D>(deserializer: D) -> Result<Vec<(i32, i32)>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_vec::<D, _, MAX_ROUTE_POINTS>(deserializer, "route points")
 }
 
 #[derive(Serialize, Deserialize)]
 struct DrawingWire {
     width: i32,
     height: i32,
+    #[serde(deserialize_with = "deserialize_boxes")]
     boxes: Vec<BoxWire>,
+    #[serde(deserialize_with = "deserialize_routes")]
     routes: Vec<RouteWire>,
+}
+
+fn deserialize_boxes<'de, D>(deserializer: D) -> Result<Vec<BoxWire>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_vec::<D, _, MAX_DRAWING_ITEMS>(deserializer, "drawing boxes")
+}
+
+fn deserialize_routes<'de, D>(deserializer: D) -> Result<Vec<RouteWire>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct RoutesVisitor;
+
+    impl<'de> Visitor<'de> for RoutesVisitor {
+        type Value = Vec<RouteWire>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(formatter, "a bounded list of drawing routes")
+        }
+
+        fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            if sequence
+                .size_hint()
+                .is_some_and(|length| length > MAX_DRAWING_ITEMS)
+            {
+                return Err(A::Error::custom(format_args!(
+                    "too many drawing routes: limit is {MAX_DRAWING_ITEMS}"
+                )));
+            }
+            let mut routes =
+                Vec::with_capacity(sequence.size_hint().unwrap_or(0).min(MAX_DRAWING_ITEMS));
+            let mut total_points = 0usize;
+            while let Some(route) = sequence.next_element::<RouteWire>()? {
+                if routes.len() == MAX_DRAWING_ITEMS {
+                    return Err(A::Error::custom(format_args!(
+                        "too many drawing routes: limit is {MAX_DRAWING_ITEMS}"
+                    )));
+                }
+                total_points = total_points.saturating_add(route.points.len());
+                if total_points > MAX_DRAWING_ROUTE_POINTS {
+                    return Err(A::Error::custom(format_args!(
+                        "too many drawing route points: limit is {MAX_DRAWING_ROUTE_POINTS}"
+                    )));
+                }
+                routes.push(route);
+            }
+            Ok(routes)
+        }
+    }
+
+    deserializer.deserialize_seq(RoutesVisitor)
 }
 
 impl Serialize for Drawing {

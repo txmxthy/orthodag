@@ -36,6 +36,7 @@ pub enum Crossing {
 /// `Options::default()` draws what most callers want and each field is
 /// something asked for deliberately.
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct Options {
     /// Draw each edge's tags on it.

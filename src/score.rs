@@ -402,6 +402,7 @@ fn detour(route: &Route) -> i32 {
 /// **Reported** is computed and deliberately left out of the objective, because
 /// these are diagnostics rather than goals.
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Score {
     /// Neighbouring edges that bend more than twice.
