@@ -27,6 +27,8 @@ mod layout;
 #[allow(dead_code)]
 mod paint;
 mod score;
+#[cfg(feature = "serde")]
+mod serde;
 mod text;
 
 pub use defect::{Defect, Fault};

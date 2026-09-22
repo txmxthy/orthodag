@@ -1,6 +1,11 @@
 //! What a caller can ask for.
 
 /// How a cell where two edges genuinely pass each other is drawn.
+#[cfg_attr(
+    feature = "serde",
+    derive(::serde::Serialize, ::serde::Deserialize),
+    serde(rename_all = "snake_case")
+)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Crossing {
     /// A bridge where the two flows differ, a junction where they do not.
@@ -30,6 +35,7 @@ pub enum Crossing {
 /// Everything here has a default that is the plainest reading of the graph, so
 /// `Options::default()` draws what most callers want and each field is
 /// something asked for deliberately.
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct Options {
     /// Draw each edge's tags on it.

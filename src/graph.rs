@@ -360,6 +360,20 @@ impl Graph {
             .map(move |index| EdgeId { provenance, index })
     }
 
+    pub(crate) fn node_id_at(&self, index: usize) -> Option<NodeId> {
+        (index < self.nodes.len()).then(|| NodeId {
+            provenance: self.provenance,
+            index: u32::try_from(index).unwrap_or(u32::MAX),
+        })
+    }
+
+    pub(crate) fn edge_id_at(&self, index: usize) -> Option<EdgeId> {
+        (index < self.edges.len()).then(|| EdgeId {
+            provenance: self.provenance,
+            index: u32::try_from(index).unwrap_or(u32::MAX),
+        })
+    }
+
     fn check_node(&self, id: NodeId) -> Result<(), GraphError> {
         if id.provenance != self.provenance {
             Err(GraphError::ForeignNode(id))
