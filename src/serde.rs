@@ -10,6 +10,9 @@ use crate::MAX_ROUTE_POINTS;
 use crate::drawing::{MAX_DRAWING_ITEMS, MAX_DRAWING_ROUTE_POINTS};
 use crate::{Defect, Drawing, Graph, Node, Rect};
 
+/// The most extra lines or tags accepted on one decoded node or edge.
+const MAX_TEXT_ITEMS: usize = 1_024;
+
 fn deserialize_bounded_vec<'de, D, T, const N: usize>(
     deserializer: D,
     name: &'static str,
@@ -85,7 +88,7 @@ struct GraphRef<'a> {
 #[derive(Deserialize)]
 struct NodeWire {
     label: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_lines")]
     lines: Vec<String>,
 }
 
@@ -93,15 +96,44 @@ struct NodeWire {
 struct EdgeWire {
     from: usize,
     to: usize,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_tags")]
     tags: Vec<String>,
 }
 
 #[derive(Deserialize)]
 struct GraphWire {
+    #[serde(deserialize_with = "deserialize_nodes")]
     nodes: Vec<NodeWire>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_edges")]
     edges: Vec<EdgeWire>,
+}
+
+fn deserialize_lines<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_vec::<D, _, MAX_TEXT_ITEMS>(deserializer, "node lines")
+}
+
+fn deserialize_tags<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_vec::<D, _, MAX_TEXT_ITEMS>(deserializer, "edge tags")
+}
+
+fn deserialize_nodes<'de, D>(deserializer: D) -> Result<Vec<NodeWire>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_vec::<D, _, MAX_DRAWING_ITEMS>(deserializer, "graph nodes")
+}
+
+fn deserialize_edges<'de, D>(deserializer: D) -> Result<Vec<EdgeWire>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_vec::<D, _, MAX_DRAWING_ITEMS>(deserializer, "graph edges")
 }
 
 impl Serialize for Graph {

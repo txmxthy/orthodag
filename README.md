@@ -187,7 +187,9 @@ With `serde`, `Graph`, `Options` and `Score` serialize and deserialize normally.
 `Drawing::deserialize_with(&graph, deserializer)` and
 `Defect::deserialize_with(&graph, deserializer)`. Their node and edge indices
 must be rebound to a graph because process-local graph identity is deliberately
-not written to the wire format.
+not written to the wire format. Decoding is bounded: a graph or drawing over the
+item budgets is refused before it is allocated, and validation costs one lookup
+per item.
 
 ### Scoring a drawing of your own
 
