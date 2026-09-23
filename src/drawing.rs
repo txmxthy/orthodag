@@ -36,6 +36,8 @@
 
 use std::fmt;
 
+use std::collections::HashSet;
+
 use crate::graph::{EdgeId, NodeId};
 use crate::layout::route::{Boxed as Placed, Layout, Route};
 
@@ -234,6 +236,14 @@ pub struct Routed<'a> {
 #[derive(Clone, Debug)]
 pub struct Drawing {
     inner: Layout,
+    /// Which nodes already have a box, so a duplicate is caught in one lookup.
+    nodes: HashSet<NodeId>,
+    /// Which edges already have a route, likewise.
+    edges: HashSet<EdgeId>,
+    /// Corners across every route so far, against the point budget.
+    points: usize,
+    /// Cells across every route so far, against the raster budget.
+    cells: u64,
 }
 
 impl Drawing {
@@ -258,13 +268,11 @@ impl Drawing {
                 limit: MAX_DRAWING_CELLS,
             });
         }
-        Ok(Self {
-            inner: Layout {
-                width,
-                height,
-                ..Layout::default()
-            },
-        })
+        Ok(Self::from_layout(Layout {
+            width,
+            height,
+            ..Layout::default()
+        }))
     }
 
     /// Places the box that draws one node.
@@ -292,7 +300,7 @@ impl Drawing {
         if at.w <= 0 || at.h <= 0 {
             return Err(DrawingError::InvalidRect { node, rect: at });
         }
-        if self.inner.boxes.iter().any(|boxed| boxed.node == node) {
+        if self.nodes.contains(&node) {
             return Err(DrawingError::DuplicateNode(node));
         }
         let right = i64::from(at.x) + i64::from(at.w);
@@ -304,6 +312,7 @@ impl Drawing {
         {
             return Err(DrawingError::BoxOutOfBounds { node, rect: at });
         }
+        self.nodes.insert(node);
         self.inner.boxes.push(Placed {
             node,
             column,
@@ -335,7 +344,7 @@ impl Drawing {
                 limit: MAX_DRAWING_ITEMS,
             });
         }
-        if self.inner.routes.iter().any(|route| route.edge == edge) {
+        if self.edges.contains(&edge) {
             return Err(DrawingError::DuplicateEdge(edge));
         }
         let points: Vec<_> = points
@@ -344,24 +353,19 @@ impl Drawing {
             .collect();
         validate_route(edge, &points, self.inner.width, self.inner.height)?;
         let all_points = self
-            .inner
-            .routes
-            .iter()
-            .try_fold(points.len(), |total, route| {
-                total.checked_add(route.points.len())
-            })
+            .points
+            .checked_add(points.len())
             .ok_or(DrawingError::RouteBudgetExceeded)?;
         let all_cells = self
-            .inner
-            .routes
-            .iter()
-            .try_fold(route_cells(&points)?, |total, route| {
-                total.checked_add(route_cells(&route.points).ok()?)
-            })
+            .cells
+            .checked_add(route_cells(&points)?)
             .ok_or(DrawingError::RouteBudgetExceeded)?;
         if all_points > MAX_DRAWING_ROUTE_POINTS || all_cells > MAX_DRAWING_ROUTE_CELLS {
             return Err(DrawingError::RouteBudgetExceeded);
         }
+        self.points = all_points;
+        self.cells = all_cells;
+        self.edges.insert(edge);
         self.inner.routes.push(Route { edge, points });
         Ok(self)
     }
@@ -415,7 +419,21 @@ impl Drawing {
     }
 
     pub(crate) fn from_layout(inner: Layout) -> Self {
-        Self { inner }
+        let nodes = inner.boxes.iter().map(|boxed| boxed.node).collect();
+        let edges = inner.routes.iter().map(|route| route.edge).collect();
+        let points = inner.routes.iter().map(|route| route.points.len()).sum();
+        let cells = inner
+            .routes
+            .iter()
+            .map(|route| segment_cells(&route.points).unwrap_or(u64::MAX))
+            .fold(0u64, u64::saturating_add);
+        Self {
+            inner,
+            nodes,
+            edges,
+            points,
+            cells,
+        }
     }
 
     pub(crate) fn layout(&self) -> &Layout {
@@ -459,19 +477,22 @@ fn validate_route(
 }
 
 fn route_cells(points: &[(i32, i32)]) -> Result<u64, DrawingError> {
-    points
-        .windows(2)
-        .try_fold(0u64, |total, segment| {
-            let [from, to] = segment else {
-                return Some(total);
-            };
-            let cells = i64::from(from.0).abs_diff(i64::from(to.0))
-                + i64::from(from.1).abs_diff(i64::from(to.1))
-                + 1;
-            total.checked_add(cells)
-        })
+    segment_cells(points)
         .filter(|cells| *cells <= MAX_DRAWING_ROUTE_CELLS)
         .ok_or(DrawingError::RouteBudgetExceeded)
+}
+
+/// How many cells the polyline's segments cover, or `None` on overflow.
+fn segment_cells(points: &[(i32, i32)]) -> Option<u64> {
+    points.windows(2).try_fold(0u64, |total, segment| {
+        let [from, to] = segment else {
+            return Some(total);
+        };
+        let cells = i64::from(from.0).abs_diff(i64::from(to.0))
+            + i64::from(from.1).abs_diff(i64::from(to.1))
+            + 1;
+        total.checked_add(cells)
+    })
 }
 
 #[cfg(test)]
