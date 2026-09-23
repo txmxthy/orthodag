@@ -18,10 +18,30 @@ Dependencies are limited to Unicode text measurement; there is never a dependenc
 on a terminal library. The output is text and styled spans, and whether those
 become escape codes, HTML or a widget buffer is the caller's business.
 
-> **Status: 0.1.0, early.** Everything documented here works and is tested.
+> **Status: alpha.** Everything documented here works and is tested, but the
+> public API and layout may change before 1.0.
 > Layout quality is measured against the committed fixtures and baseline in
 > [docs/quality.md](docs/quality.md); those small examples do not establish
 > quality on larger or different graphs.
+
+## Quick start
+
+```console
+cargo add orthodag
+```
+
+```rust
+use orthodag::{Graph, Node};
+
+let mut graph = Graph::new();
+let read = graph.add_node(Node::new("read"));
+let parse = graph.add_node(Node::new("parse"));
+graph
+    .add_edge(read, parse)
+    .expect("both nodes belong to this graph");
+
+print!("{}", orthodag::draw(&graph));
+```
 
 ## Motivation
 
@@ -119,23 +139,7 @@ between neighbouring columns, four across a skip, and nothing else is
 permitted. This is enforced as a hard tier of the objective, so a candidate
 drawing that breaks it is refused whatever else it improves.
 
-## Start here
-
-```toml
-[dependencies]
-orthodag = "0.1"
-```
-
-```rust
-use orthodag::{Graph, Node};
-
-let mut g = Graph::new();
-let a = g.add_node(Node::new("read"));
-let b = g.add_node(Node::new("parse"));
-g.add_edge(a, b).expect("both nodes belong to this graph");
-
-print!("{}", orthodag::draw(&g));
-```
+## Usage
 
 ### Colour
 
@@ -146,7 +150,7 @@ line through it, and the caller decides what that looks like:
 ```rust
 use orthodag::Part;
 
-for row in orthodag::spans(&g) {
+for row in orthodag::spans(&graph) {
     for span in row {
         match (span.part, span.colour) {
             (Part::Flow, Some(slot)) => print!("\x1b[3{}m{}\x1b[0m", slot.slot() + 1, span.text),
@@ -165,7 +169,7 @@ keeps its colour across the whole drawing.
 ```rust
 use orthodag::Options;
 
-print!("{}", orthodag::draw_with(&g, Options::new().width(80)));
+print!("{}", orthodag::draw_with(&graph, Options::new().width(80)));
 ```
 
 A drawing has a natural width. Asking for less shrinks it through a fixed
