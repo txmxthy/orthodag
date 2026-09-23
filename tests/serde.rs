@@ -154,6 +154,61 @@ fn aggregate_route_data_is_bounded_during_decode() {
 }
 
 #[test]
+fn oversized_graph_data_is_rejected_during_decode() {
+    let node = r#"{"label":"n"}"#;
+    let nodes = std::iter::repeat_n(node, 65_537)
+        .collect::<Vec<_>>()
+        .join(",");
+    let json = format!(r#"{{"nodes":[{nodes}],"edges":[]}}"#);
+
+    let error = serde_json::from_str::<Graph>(&json).unwrap_err();
+    assert!(error.to_string().contains("graph nodes"));
+    assert!(error.to_string().contains("limit"));
+
+    let tags = std::iter::repeat_n(r#""t""#, 1_025)
+        .collect::<Vec<_>>()
+        .join(",");
+    let json =
+        format!(r#"{{"nodes":[{node},{node}],"edges":[{{"from":0,"to":1,"tags":[{tags}]}}]}}"#);
+
+    let error = serde_json::from_str::<Graph>(&json).unwrap_err();
+    assert!(error.to_string().contains("edge tags"));
+}
+
+/// A drawing at the item budget decodes in time that grows with its size, so
+/// the budget bounds work as well as memory.
+#[test]
+fn a_large_valid_drawing_decodes_in_linear_time() {
+    let mut graph = Graph::new();
+    let ids: Vec<_> = (0..20_000)
+        .map(|i| graph.add_node(Node::new(i.to_string())))
+        .collect();
+    for pair in ids.windows(2) {
+        graph.add_edge(pair[0], pair[1]).unwrap();
+    }
+    let boxes = (0..20_000)
+        .map(|i| format!(r#"{{"node":{i},"column":0,"x":0,"y":0,"w":1,"h":1}}"#))
+        .collect::<Vec<_>>()
+        .join(",");
+    let routes = (0..19_999)
+        .map(|i| format!(r#"{{"edge":{i},"points":[[0,0],[3,0]]}}"#))
+        .collect::<Vec<_>>()
+        .join(",");
+    let json = format!(r#"{{"width":4,"height":4,"boxes":[{boxes}],"routes":[{routes}]}}"#);
+
+    let started = std::time::Instant::now();
+    let mut deserializer = serde_json::Deserializer::from_str(&json);
+    let decoded = Drawing::deserialize_with(&graph, &mut deserializer).unwrap();
+    assert_eq!(decoded.boxes().count(), 20_000);
+    assert_eq!(decoded.routes().count(), 19_999);
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "decoding took {:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
 fn a_defect_rebinds_to_its_graph() {
     let graph = graph();
     let edge = graph.edge_ids().next().unwrap();

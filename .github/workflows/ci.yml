@@ -33,6 +33,9 @@ jobs:
 
   msrv:
     runs-on: ubuntu-latest
+    env:
+      # rust-toolchain.toml pins stable; the environment outranks it.
+      RUSTUP_TOOLCHAIN: "1.96.0"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -57,6 +60,8 @@ jobs:
           - name: dot
             flags: --no-default-features --features dot
     name: features (${{ matrix.name }})
+    env:
+      RUSTUP_TOOLCHAIN: "1.96.0"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
