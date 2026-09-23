@@ -8,6 +8,7 @@ description = "Draw a directed graph as Unicode box-drawing text."
 keywords = ["graph", "dag", "ascii", "terminal", "layout"]
 categories = ["visualization", "command-line-interface"]
 repository = "https://github.com/txmxthy/orthodag"
+exclude = [".github/", "justfile", "rust-toolchain.toml", "docs/plan.md"]
 
 [features]
 default = []
