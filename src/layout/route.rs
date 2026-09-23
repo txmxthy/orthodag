@@ -274,7 +274,7 @@ fn captions(g: &Graph, paths: &[Path], style: Style) -> Captions {
         let Some(caption) = text.get(at).and_then(Option::as_deref) else {
             continue;
         };
-        let room = i32::try_from(caption.chars().count()).unwrap_or(0) + 1;
+        let room = i32::try_from(crate::text::width(caption)).unwrap_or(0) + 1;
         if per_gap.len() <= path.first {
             per_gap.resize(path.first + 1, 0);
         }
@@ -398,7 +398,7 @@ fn widths(g: &Graph, columns: &Columns, style: Style) -> Vec<i32> {
                 .map(|node| {
                     let longest = std::iter::once(node.label())
                         .chain(node.lines().iter().map(String::as_str))
-                        .map(|line| line.chars().count().min(style.cap))
+                        .map(|line| crate::text::width(line).min(style.cap))
                         .map(|len| i32::try_from(len).unwrap_or(i32::MAX))
                         .max()
                         .unwrap_or(0);

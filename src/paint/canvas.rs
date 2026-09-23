@@ -14,10 +14,6 @@ use super::glyph::glyph;
 use super::grid::Grid;
 use crate::colour::Colour;
 
-/// The characters a bridge is drawn with, which belong to the flows under them
-/// rather than to a box.
-const BRIDGE: [char; 3] = ['│', '╴', '╶'];
-
 pub use crate::drawing::Heading;
 
 impl Heading {
@@ -26,11 +22,6 @@ impl Heading {
             Self::Right => '▶',
             Self::Up => '▲',
         }
-    }
-
-    /// Whether a character is an arrowhead, whichever way it points.
-    fn is_head(ch: char) -> bool {
-        [Self::Right, Self::Up].iter().any(|h| h.glyph() == ch)
     }
 }
 
@@ -44,6 +35,30 @@ enum Ink {
     /// Two flows of different colours. The cell holds one character and so one
     /// ink; this is the layout's defect to avoid, not the painter's to resolve.
     Mixed,
+}
+
+/// Text painted over the line grid.
+#[derive(Clone, PartialEq, Eq, Debug)]
+enum Overlay {
+    Char(char),
+    Grapheme(String),
+    Continuation,
+}
+
+enum Cell<'a> {
+    Char(char),
+    Grapheme(&'a str),
+    Continuation,
+}
+
+impl Cell<'_> {
+    fn append_to(self, text: &mut String) {
+        match self {
+            Self::Char(ch) => text.push(ch),
+            Self::Grapheme(grapheme) => text.push_str(grapheme),
+            Self::Continuation => {}
+        }
+    }
 }
 
 /// What a span is part of.
@@ -78,7 +93,7 @@ pub struct Span {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Canvas {
     grid: Grid,
-    over: Vec<Option<char>>,
+    over: Vec<Option<Overlay>>,
     ink: Vec<Ink>,
 }
 
@@ -124,26 +139,47 @@ impl Canvas {
     /// Puts one character over whatever is underneath.
     pub(crate) fn put(&mut self, x: i32, y: i32, ch: char) {
         if let Some(at) = self.at(x, y) {
-            self.over[at] = Some(ch);
+            self.over[at] = Some(Overlay::Char(ch));
         }
     }
 
     /// Puts a run of text that belongs to a flow rather than to a box.
     pub(crate) fn write_over(&mut self, x: i32, y: i32, text: &str, colour: Option<Colour>) {
-        self.write(x, y, text);
-        for step in 0..i32::try_from(text.chars().count()).unwrap_or(0) {
+        let width = self.write_text(x, y, text);
+        for step in 0..i32::try_from(width).unwrap_or(0) {
             self.stain(x + step, y, colour);
         }
     }
 
-    /// Puts a run of text, one character per cell, starting at `x`.
+    /// Puts a run of text into terminal cells, starting at `x`.
     pub(crate) fn write(&mut self, x: i32, y: i32, text: &str) {
-        for (step, ch) in text.chars().enumerate() {
-            let Ok(step) = i32::try_from(step) else {
+        let _ = self.write_text(x, y, text);
+    }
+
+    fn write_text(&mut self, x: i32, y: i32, text: &str) -> usize {
+        let mut step = 0usize;
+        crate::text::graphemes(text, |grapheme, width| {
+            let Ok(offset) = i32::try_from(step) else {
                 return;
             };
-            self.put(x + step, y, ch);
-        }
+            if let Some(at) = self.at(x + offset, y) {
+                let mut chars = grapheme.chars();
+                self.over[at] = match (chars.next(), chars.next()) {
+                    (Some(ch), None) => Some(Overlay::Char(ch)),
+                    _ => Some(Overlay::Grapheme(grapheme.to_owned())),
+                };
+            }
+            for continuation in 1..width {
+                let Ok(continuation) = i32::try_from(continuation) else {
+                    return;
+                };
+                if let Some(at) = self.at(x + offset + continuation, y) {
+                    self.over[at] = Some(Overlay::Continuation);
+                }
+            }
+            step += width;
+        });
+        step
     }
 
     /// Draws a box border. `w` and `h` count the border cells.
@@ -161,7 +197,7 @@ impl Canvas {
         for step in y..=bottom {
             for across in x..=right {
                 if let Some(at) = self.at(across, step) {
-                    self.over[at] = Some(' ');
+                    self.over[at] = Some(Overlay::Char(' '));
                     self.ink[at] = Ink::Blank;
                 }
             }
@@ -229,15 +265,18 @@ impl Canvas {
         }
         let drawn = glyph(self.grid.bits(x, y));
         if ch == '│' || drawn == '─' {
-            self.over[at] = Some(ch);
+            self.over[at] = Some(Overlay::Char(ch));
         }
     }
 
     /// What one cell reads as: the overlay if there is one, else the bits.
-    fn cell(&self, x: i32, y: i32) -> char {
-        self.at(x, y)
-            .and_then(|at| self.over[at])
-            .unwrap_or_else(|| glyph(self.grid.bits(x, y)))
+    fn cell(&self, x: i32, y: i32) -> Cell<'_> {
+        match self.at(x, y).and_then(|at| self.over[at].as_ref()) {
+            Some(Overlay::Char(ch)) => Cell::Char(*ch),
+            Some(Overlay::Grapheme(text)) => Cell::Grapheme(text),
+            Some(Overlay::Continuation) => Cell::Continuation,
+            None => Cell::Char(glyph(self.grid.bits(x, y))),
+        }
     }
 
     /// What colour one cell is drawn in.
@@ -261,13 +300,6 @@ impl Canvas {
 
     fn colour_at(&self, x: i32, y: i32) -> Option<Colour> {
         let at = self.at(x, y)?;
-        // A border or a label on a box has no flow; an arrowhead and a caption
-        // on an edge do, and were stained when they were written.
-        if self.over[at].is_some_and(|ch| !Heading::is_head(ch) && !BRIDGE.contains(&ch))
-            && self.ink[at] == Ink::Blank
-        {
-            return None;
-        }
         match self.ink[at] {
             Ink::One(colour) => colour,
             Ink::Blank | Ink::Mixed => None,
@@ -285,17 +317,17 @@ impl Canvas {
             .map(|y| {
                 let mut spans: Vec<Span> = Vec::new();
                 for x in (0..self.grid.width()).filter_map(|x| i32::try_from(x).ok()) {
-                    let ch = self.cell(x, y);
+                    let cell = self.cell(x, y);
                     let (colour, part) = (self.colour_at(x, y), self.part_at(x, y));
                     match spans.last_mut() {
                         Some(span) if span.colour == colour && span.part == part => {
-                            span.text.push(ch);
+                            cell.append_to(&mut span.text);
                         }
-                        _ => spans.push(Span {
-                            text: ch.to_string(),
-                            colour,
-                            part,
-                        }),
+                        _ => {
+                            let mut text = String::new();
+                            cell.append_to(&mut text);
+                            spans.push(Span { text, colour, part });
+                        }
                     }
                 }
                 if let Some(last) = spans.last_mut() {
@@ -322,7 +354,7 @@ impl fmt::Display for Canvas {
                 let (Ok(x), Ok(y)) = (i32::try_from(x), i32::try_from(y)) else {
                     continue;
                 };
-                line.push(self.cell(x, y));
+                self.cell(x, y).append_to(&mut line);
             }
             writeln!(f, "{}", line.trim_end())?;
         }

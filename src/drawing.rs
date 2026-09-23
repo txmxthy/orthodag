@@ -12,32 +12,164 @@
 //! ```
 //! use orthodag::{Drawing, Graph, Node, Rect};
 //!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let mut g = Graph::new();
 //! let a = g.add_node(Node::new("a"));
 //! let b = g.add_node(Node::new("b"));
-//! let edge = g.add_edge(a, b);
+//! let edge = g.add_edge(a, b)?;
 //!
-//! let mut drawing = Drawing::new(20, 3);
-//! drawing.boxed(a, 0, Rect::new(0, 0, 5, 3));
-//! drawing.boxed(b, 1, Rect::new(15, 0, 5, 3));
-//! drawing.route(edge, [(5, 1), (14, 1)]);
+//! let mut drawing = Drawing::new(20, 3)?;
+//! drawing.boxed(a, 0, Rect::new(0, 0, 5, 3))?;
+//! drawing.boxed(b, 1, Rect::new(15, 0, 5, 3))?;
+//! drawing.route(edge, [(5, 1), (14, 1)])?;
 //!
 //! // A straight edge between two boxes: nothing to charge for.
-//! assert_eq!(orthodag::score_drawing(&g, &drawing).total, 0);
+//! assert_eq!(orthodag::score_drawing(&g, &drawing)?.total, 0);
+//! # Ok(())
+//! # }
 //! ```
 //!
-//! # What is not checked
-//!
-//! A `Drawing` is taken at its word. Nothing verifies that a route ends on the
-//! box it claims, that the polyline is orthogonal, or that the cells fit the
-//! size given — a diagonal segment is skipped by the rasteriser and a cell
-//! outside the size is dropped, silently, because a scorer that panics on
-//! unexpected input is a scorer nobody runs twice. Points are in the same cell
-//! coordinates the drawing is measured in: `x` rightward, `y` downward, origin
-//! top left, both inclusive of the cells the line actually occupies.
+//! Points are in the same cell coordinates the drawing is measured in: `x`
+//! rightward, `y` downward, origin top left, both inclusive of the cells the
+//! line actually occupies. Construction rejects geometry that is outside that
+//! frame or would make painting and scoring unbounded.
+
+use std::fmt;
 
 use crate::graph::{EdgeId, NodeId};
 use crate::layout::route::{Boxed as Placed, Layout, Route};
+
+/// The largest frame a caller-provided drawing may allocate.
+pub const MAX_DRAWING_CELLS: u64 = 4_000_000;
+
+/// The most corners accepted in one caller-provided route.
+pub const MAX_ROUTE_POINTS: usize = 4_096;
+
+pub(crate) const MAX_DRAWING_ITEMS: usize = 65_536;
+pub(crate) const MAX_DRAWING_ROUTE_POINTS: usize = 262_144;
+const MAX_DRAWING_ROUTE_CELLS: u64 = 8_000_000;
+
+/// Why caller-provided drawing geometry was rejected.
+#[derive(Clone, PartialEq, Eq, Debug)]
+#[non_exhaustive]
+pub enum DrawingError {
+    /// The frame is empty or has a negative dimension.
+    InvalidSize {
+        /// Requested width.
+        width: i32,
+        /// Requested height.
+        height: i32,
+    },
+    /// The frame would allocate more cells than the public drawing budget.
+    FrameTooLarge {
+        /// Requested cell count.
+        cells: u64,
+        /// Maximum accepted cell count.
+        limit: u64,
+    },
+    /// A box has an empty or negative size.
+    InvalidRect {
+        /// Node being placed.
+        node: NodeId,
+        /// Rejected rectangle.
+        rect: Rect,
+    },
+    /// A box is not wholly inside the frame.
+    BoxOutOfBounds {
+        /// Node being placed.
+        node: NodeId,
+        /// Rejected rectangle.
+        rect: Rect,
+    },
+    /// The same node was assigned more than one box.
+    DuplicateNode(NodeId),
+    /// A box names no node in the graph being drawn.
+    UnknownNode(NodeId),
+    /// The same edge was assigned more than one route.
+    DuplicateEdge(EdgeId),
+    /// A route names no edge in the graph being drawn.
+    UnknownEdge(EdgeId),
+    /// An orthogonal polyline needs at least two points.
+    RouteTooShort(EdgeId),
+    /// One route contains more corners than the per-route budget.
+    RouteTooLong {
+        /// Edge being routed.
+        edge: EdgeId,
+        /// Requested point count.
+        points: usize,
+        /// Maximum accepted point count.
+        limit: usize,
+    },
+    /// A route point is outside the frame.
+    RouteOutOfBounds {
+        /// Edge being routed.
+        edge: EdgeId,
+        /// First rejected point.
+        point: (i32, i32),
+    },
+    /// Consecutive route points do not form a horizontal or vertical segment.
+    DiagonalSegment {
+        /// Edge being routed.
+        edge: EdgeId,
+        /// Segment start.
+        from: (i32, i32),
+        /// Segment end.
+        to: (i32, i32),
+    },
+    /// The drawing contains too many boxes or routes.
+    TooManyItems {
+        /// Maximum accepted count for boxes or routes.
+        limit: usize,
+    },
+    /// All routes together exceed the point or raster-work budget.
+    RouteBudgetExceeded,
+}
+
+impl fmt::Display for DrawingError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidSize { width, height } => {
+                write!(f, "drawing size must be positive, got {width}x{height}")
+            }
+            Self::FrameTooLarge { cells, limit } => {
+                write!(f, "drawing has {cells} cells; the limit is {limit}")
+            }
+            Self::InvalidRect { node, rect } => write!(
+                f,
+                "box for {node} must have positive dimensions, got {}x{}",
+                rect.w, rect.h
+            ),
+            Self::BoxOutOfBounds { node, .. } => {
+                write!(f, "box for {node} is outside the drawing frame")
+            }
+            Self::DuplicateNode(node) => write!(f, "{node} has more than one box"),
+            Self::UnknownNode(node) => write!(f, "{node} is not in the graph"),
+            Self::DuplicateEdge(edge) => write!(f, "{edge} has more than one route"),
+            Self::UnknownEdge(edge) => write!(f, "{edge} is not in the graph"),
+            Self::RouteTooShort(edge) => write!(f, "route for {edge} has fewer than two points"),
+            Self::RouteTooLong {
+                edge,
+                points,
+                limit,
+            } => write!(
+                f,
+                "route for {edge} has {points} points; the limit is {limit}"
+            ),
+            Self::RouteOutOfBounds { edge, point } => {
+                write!(f, "route for {edge} leaves the frame at {point:?}")
+            }
+            Self::DiagonalSegment { edge, from, to } => {
+                write!(f, "route for {edge} is diagonal from {from:?} to {to:?}")
+            }
+            Self::TooManyItems { limit } => {
+                write!(f, "drawing has more than {limit} boxes or routes")
+            }
+            Self::RouteBudgetExceeded => write!(f, "drawing routes exceed the work budget"),
+        }
+    }
+}
+
+impl std::error::Error for DrawingError {}
 
 /// Where a box sits, in cells.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -99,21 +231,40 @@ pub struct Routed<'a> {
 /// to [`score_drawing`](crate::score_drawing); or handed back by
 /// [`layout`](crate::layout) and read through [`boxes`](Self::boxes) and
 /// [`routes`](Self::routes) by a caller that paints its own boxes.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct Drawing {
     inner: Layout,
 }
 
 impl Drawing {
     /// An empty drawing of a given size, in cells.
-    pub fn new(width: i32, height: i32) -> Self {
-        Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DrawingError::InvalidSize`] for an empty frame and
+    /// [`DrawingError::FrameTooLarge`] when its allocation would exceed the
+    /// public cell budget.
+    pub fn new(width: i32, height: i32) -> Result<Self, DrawingError> {
+        if width <= 0 || height <= 0 {
+            return Err(DrawingError::InvalidSize { width, height });
+        }
+        let cells = u64::try_from(width)
+            .ok()
+            .and_then(|width| u64::try_from(height).ok().map(|height| width * height))
+            .unwrap_or(u64::MAX);
+        if cells > MAX_DRAWING_CELLS {
+            return Err(DrawingError::FrameTooLarge {
+                cells,
+                limit: MAX_DRAWING_CELLS,
+            });
+        }
+        Ok(Self {
             inner: Layout {
                 width,
                 height,
                 ..Layout::default()
             },
-        }
+        })
     }
 
     /// Places the box that draws one node.
@@ -122,7 +273,37 @@ impl Drawing {
     /// It is what tells the scorer how far an edge into this box has come, and
     /// therefore how many bends that edge is allowed: a renderer that does not
     /// think in layers should pass the rank it would have had.
-    pub fn boxed(&mut self, node: NodeId, column: usize, at: Rect) -> &mut Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`DrawingError`] when the rectangle is empty, outside the
+    /// frame, duplicated, or over the drawing's item budget.
+    pub fn boxed(
+        &mut self,
+        node: NodeId,
+        column: usize,
+        at: Rect,
+    ) -> Result<&mut Self, DrawingError> {
+        if self.inner.boxes.len() >= MAX_DRAWING_ITEMS {
+            return Err(DrawingError::TooManyItems {
+                limit: MAX_DRAWING_ITEMS,
+            });
+        }
+        if at.w <= 0 || at.h <= 0 {
+            return Err(DrawingError::InvalidRect { node, rect: at });
+        }
+        if self.inner.boxes.iter().any(|boxed| boxed.node == node) {
+            return Err(DrawingError::DuplicateNode(node));
+        }
+        let right = i64::from(at.x) + i64::from(at.w);
+        let bottom = i64::from(at.y) + i64::from(at.h);
+        if at.x < 0
+            || at.y < 0
+            || right > i64::from(self.inner.width)
+            || bottom > i64::from(self.inner.height)
+        {
+            return Err(DrawingError::BoxOutOfBounds { node, rect: at });
+        }
         self.inner.boxes.push(Placed {
             node,
             column,
@@ -131,7 +312,7 @@ impl Drawing {
             w: at.w,
             h: at.h,
         });
-        self
+        Ok(self)
     }
 
     /// Lays one edge down as an orthogonal polyline, corner to corner.
@@ -139,16 +320,50 @@ impl Drawing {
     /// The first point is where the line leaves its source and the last is
     /// where it arrives at its target; every point between is a right-angle
     /// turn. Two points are a straight line, three an **L**, four a **Z**.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`DrawingError`] when the route is duplicated, non-orthogonal,
+    /// outside the frame, or exceeds a point or raster-work budget.
     pub fn route(
         &mut self,
         edge: EdgeId,
         points: impl IntoIterator<Item = (i32, i32)>,
-    ) -> &mut Self {
-        self.inner.routes.push(Route {
-            edge,
-            points: points.into_iter().collect(),
-        });
-        self
+    ) -> Result<&mut Self, DrawingError> {
+        if self.inner.routes.len() >= MAX_DRAWING_ITEMS {
+            return Err(DrawingError::TooManyItems {
+                limit: MAX_DRAWING_ITEMS,
+            });
+        }
+        if self.inner.routes.iter().any(|route| route.edge == edge) {
+            return Err(DrawingError::DuplicateEdge(edge));
+        }
+        let points: Vec<_> = points
+            .into_iter()
+            .take(MAX_ROUTE_POINTS.saturating_add(1))
+            .collect();
+        validate_route(edge, &points, self.inner.width, self.inner.height)?;
+        let all_points = self
+            .inner
+            .routes
+            .iter()
+            .try_fold(points.len(), |total, route| {
+                total.checked_add(route.points.len())
+            })
+            .ok_or(DrawingError::RouteBudgetExceeded)?;
+        let all_cells = self
+            .inner
+            .routes
+            .iter()
+            .try_fold(route_cells(&points)?, |total, route| {
+                total.checked_add(route_cells(&route.points).ok()?)
+            })
+            .ok_or(DrawingError::RouteBudgetExceeded)?;
+        if all_points > MAX_DRAWING_ROUTE_POINTS || all_cells > MAX_DRAWING_ROUTE_CELLS {
+            return Err(DrawingError::RouteBudgetExceeded);
+        }
+        self.inner.routes.push(Route { edge, points });
+        Ok(self)
     }
 
     /// The frame size this drawing was declared at.
@@ -179,6 +394,26 @@ impl Drawing {
         })
     }
 
+    /// Checks that every box and route belongs to the graph being drawn.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DrawingError::UnknownNode`] or [`DrawingError::UnknownEdge`]
+    /// for an identifier the graph cannot resolve.
+    pub fn validate(&self, graph: &crate::Graph) -> Result<(), DrawingError> {
+        for boxed in &self.inner.boxes {
+            if graph.node(boxed.node).is_none() {
+                return Err(DrawingError::UnknownNode(boxed.node));
+            }
+        }
+        for route in &self.inner.routes {
+            if graph.edge(route.edge).is_none() {
+                return Err(DrawingError::UnknownEdge(route.edge));
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn from_layout(inner: Layout) -> Self {
         Self { inner }
     }
@@ -188,11 +423,66 @@ impl Drawing {
     }
 }
 
+fn validate_route(
+    edge: EdgeId,
+    points: &[(i32, i32)],
+    width: i32,
+    height: i32,
+) -> Result<(), DrawingError> {
+    if points.len() < 2 {
+        return Err(DrawingError::RouteTooShort(edge));
+    }
+    if points.len() > MAX_ROUTE_POINTS {
+        return Err(DrawingError::RouteTooLong {
+            edge,
+            points: points.len(),
+            limit: MAX_ROUTE_POINTS,
+        });
+    }
+    for &point in points {
+        if point.0 < 0 || point.1 < 0 || point.0 >= width || point.1 >= height {
+            return Err(DrawingError::RouteOutOfBounds { edge, point });
+        }
+    }
+    for segment in points.windows(2) {
+        let [from, to] = segment else { continue };
+        if from.0 != to.0 && from.1 != to.1 {
+            return Err(DrawingError::DiagonalSegment {
+                edge,
+                from: *from,
+                to: *to,
+            });
+        }
+    }
+    route_cells(points)?;
+    Ok(())
+}
+
+fn route_cells(points: &[(i32, i32)]) -> Result<u64, DrawingError> {
+    points
+        .windows(2)
+        .try_fold(0u64, |total, segment| {
+            let [from, to] = segment else {
+                return Some(total);
+            };
+            let cells = i64::from(from.0).abs_diff(i64::from(to.0))
+                + i64::from(from.1).abs_diff(i64::from(to.1))
+                + 1;
+            total.checked_add(cells)
+        })
+        .filter(|cells| *cells <= MAX_DRAWING_ROUTE_CELLS)
+        .ok_or(DrawingError::RouteBudgetExceeded)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::graph::{Graph, Node};
     use crate::options::Options;
+
+    fn drawing(width: i32, height: i32) -> Drawing {
+        Drawing::new(width, height).expect("the test frame is valid")
+    }
 
     /// Two boxes, one straight line: the drawing every metric is calibrated to
     /// charge nothing for.
@@ -201,14 +491,14 @@ mod tests {
         let mut g = Graph::new();
         let a = g.add_node(Node::new("a"));
         let b = g.add_node(Node::new("b"));
-        let edge = g.add_edge(a, b);
+        let edge = g.add_edge(a, b).unwrap();
 
-        let mut drawing = Drawing::new(20, 3);
-        drawing.boxed(a, 0, Rect::new(0, 0, 5, 3));
-        drawing.boxed(b, 1, Rect::new(15, 0, 5, 3));
-        drawing.route(edge, [(5, 1), (14, 1)]);
+        let mut drawing = drawing(20, 3);
+        drawing.boxed(a, 0, Rect::new(0, 0, 5, 3)).unwrap();
+        drawing.boxed(b, 1, Rect::new(15, 0, 5, 3)).unwrap();
+        drawing.route(edge, [(5, 1), (14, 1)]).unwrap();
 
-        let score = crate::score_drawing(&g, &drawing);
+        let score = crate::score_drawing(&g, &drawing).unwrap();
         assert_eq!(score.vocabulary(), [0; 4]);
         assert_eq!(score.total, 0);
         assert_eq!(score.ink, 10);
@@ -222,14 +512,16 @@ mod tests {
         let mut g = Graph::new();
         let a = g.add_node(Node::new("a"));
         let b = g.add_node(Node::new("b"));
-        let edge = g.add_edge(a, b);
+        let edge = g.add_edge(a, b).unwrap();
 
-        let mut drawing = Drawing::new(20, 6);
-        drawing.boxed(a, 0, Rect::new(0, 0, 5, 3));
-        drawing.boxed(b, 1, Rect::new(15, 3, 5, 3));
-        drawing.route(edge, [(5, 1), (10, 1), (10, 4), (14, 4)]);
+        let mut drawing = drawing(20, 6);
+        drawing.boxed(a, 0, Rect::new(0, 0, 5, 3)).unwrap();
+        drawing.boxed(b, 1, Rect::new(15, 3, 5, 3)).unwrap();
+        drawing
+            .route(edge, [(5, 1), (10, 1), (10, 4), (14, 4)])
+            .unwrap();
 
-        let score = crate::score_drawing(&g, &drawing);
+        let score = crate::score_drawing(&g, &drawing).unwrap();
         assert_eq!(score.vocabulary(), [0; 4]);
         assert_eq!(
             score.detour, 0,
@@ -243,23 +535,26 @@ mod tests {
         let mut g = Graph::new();
         let a = g.add_node(Node::new("a"));
         let b = g.add_node(Node::new("b"));
-        let edge = g.add_edge(a, b);
+        let edge = g.add_edge(a, b).unwrap();
 
         let boxes = |d: &mut Drawing| {
-            d.boxed(a, 0, Rect::new(0, 0, 5, 3));
-            d.boxed(b, 1, Rect::new(15, 0, 5, 3));
+            d.boxed(a, 0, Rect::new(0, 0, 5, 3)).unwrap();
+            d.boxed(b, 1, Rect::new(15, 0, 5, 3)).unwrap();
         };
 
-        let mut straight = Drawing::new(20, 8);
+        let mut straight = drawing(20, 8);
         boxes(&mut straight);
-        straight.route(edge, [(5, 1), (14, 1)]);
+        straight.route(edge, [(5, 1), (14, 1)]).unwrap();
 
-        let mut wandering = Drawing::new(20, 8);
+        let mut wandering = drawing(20, 8);
         boxes(&mut wandering);
-        wandering.route(edge, [(5, 1), (8, 1), (8, 6), (12, 6), (12, 1), (14, 1)]);
+        wandering
+            .route(edge, [(5, 1), (8, 1), (8, 6), (12, 6), (12, 1), (14, 1)])
+            .unwrap();
 
         assert!(
-            crate::score_drawing(&g, &wandering).total > crate::score_drawing(&g, &straight).total
+            crate::score_drawing(&g, &wandering).unwrap().total
+                > crate::score_drawing(&g, &straight).unwrap().total
         );
     }
 
@@ -277,18 +572,18 @@ mod tests {
             .iter()
             .map(|n| g.add_node(Node::new(*n)))
             .collect();
-        let across = g.add_edge(ids[0], ids[1]);
-        let down = g.add_edge(ids[2], ids[3]);
+        let across = g.add_edge(ids[0], ids[1]).unwrap();
+        let down = g.add_edge(ids[2], ids[3]).unwrap();
 
-        let mut drawing = Drawing::new(9, 5);
-        drawing.boxed(ids[0], 0, Rect::new(0, 1, 3, 3));
-        drawing.boxed(ids[1], 1, Rect::new(6, 1, 3, 3));
-        drawing.boxed(ids[2], 0, Rect::new(3, 0, 2, 2));
-        drawing.boxed(ids[3], 1, Rect::new(3, 4, 2, 2));
-        drawing.route(across, [(3, 2), (5, 2)]);
-        drawing.route(down, [(4, 0), (4, 4)]);
+        let mut drawing = drawing(9, 6);
+        drawing.boxed(ids[0], 0, Rect::new(0, 1, 3, 3)).unwrap();
+        drawing.boxed(ids[1], 1, Rect::new(6, 1, 3, 3)).unwrap();
+        drawing.boxed(ids[2], 0, Rect::new(3, 0, 2, 2)).unwrap();
+        drawing.boxed(ids[3], 1, Rect::new(3, 4, 2, 2)).unwrap();
+        drawing.route(across, [(3, 2), (5, 2)]).unwrap();
+        drawing.route(down, [(4, 0), (4, 4)]).unwrap();
 
-        let art = crate::draw_drawing(&g, &drawing, Options::default());
+        let art = crate::draw_drawing(&g, &drawing, Options::default()).unwrap();
         assert!(
             art.contains('╴') || art.contains('╶'),
             "the crossing reads as one line:\n{art}"
@@ -306,17 +601,17 @@ mod tests {
             .iter()
             .map(|n| g.add_node(Node::new(*n)))
             .collect();
-        let up = g.add_edge(ids[0], ids[1]);
-        let down = g.add_edge(ids[0], ids[2]);
+        let up = g.add_edge(ids[0], ids[1]).unwrap();
+        let down = g.add_edge(ids[0], ids[2]).unwrap();
 
-        let mut drawing = Drawing::new(9, 5);
-        drawing.boxed(ids[0], 0, Rect::new(0, 1, 3, 3));
-        drawing.boxed(ids[1], 1, Rect::new(6, 0, 3, 2));
-        drawing.boxed(ids[2], 1, Rect::new(6, 3, 3, 2));
-        drawing.route(up, [(3, 2), (5, 2)]);
-        drawing.route(down, [(4, 1), (4, 4)]);
+        let mut drawing = drawing(9, 5);
+        drawing.boxed(ids[0], 0, Rect::new(0, 1, 3, 3)).unwrap();
+        drawing.boxed(ids[1], 1, Rect::new(6, 0, 3, 2)).unwrap();
+        drawing.boxed(ids[2], 1, Rect::new(6, 3, 3, 2)).unwrap();
+        drawing.route(up, [(3, 2), (5, 2)]).unwrap();
+        drawing.route(down, [(4, 1), (4, 4)]).unwrap();
 
-        let art = crate::draw_drawing(&g, &drawing, Options::default());
+        let art = crate::draw_drawing(&g, &drawing, Options::default()).unwrap();
         assert!(
             !art.contains('╴') && !art.contains('╶'),
             "a fan was broken apart:\n{art}"
@@ -335,14 +630,14 @@ mod tests {
             .iter()
             .map(|n| g.add_node(Node::new(*n)))
             .collect();
-        let beneath = g.add_tagged_edge(ids[0], ids[1], ["t"]);
+        let beneath = g.add_tagged_edge(ids[0], ids[1], ["t"]).unwrap();
 
-        let mut drawing = Drawing::new(9, 7);
-        drawing.boxed(ids[2], 0, Rect::new(2, 1, 5, 5));
+        let mut drawing = drawing(9, 7);
+        drawing.boxed(ids[2], 0, Rect::new(2, 1, 5, 5)).unwrap();
         // Straight down the middle: in at the top of the box, out at the bottom.
-        drawing.route(beneath, [(4, 0), (4, 6)]);
+        drawing.route(beneath, [(4, 0), (4, 6)]).unwrap();
 
-        let art = crate::draw_drawing(&g, &drawing, Options::default());
+        let art = crate::draw_drawing(&g, &drawing, Options::default()).unwrap();
         let rows: Vec<Vec<char>> = art.lines().map(|row| row.chars().collect()).collect();
         let across = |row: usize| -> String {
             rows.get(row)
@@ -366,9 +661,9 @@ mod tests {
             .iter()
             .map(|n| g.add_node(Node::new(*n)))
             .collect();
-        g.add_edge(ids[0], ids[1]);
-        g.add_tagged_edge(ids[1], ids[2], ["t"]);
-        g.add_edge(ids[2], ids[1]);
+        g.add_edge(ids[0], ids[1]).unwrap();
+        g.add_tagged_edge(ids[1], ids[2], ["t"]).unwrap();
+        g.add_edge(ids[2], ids[1]).unwrap();
         let options = Options::default();
 
         let drawing = crate::layout(&g, options);
@@ -382,7 +677,7 @@ mod tests {
         let first = drawing.boxed_at(ids[0]).map(|b| b.column);
         assert_eq!(first, Some(0));
         assert_eq!(
-            crate::draw_drawing(&g, &drawing, options),
+            crate::draw_drawing(&g, &drawing, options).unwrap(),
             crate::draw_with(&g, options)
         );
     }
@@ -393,8 +688,8 @@ mod tests {
         let mut g = Graph::new();
         let a = g.add_node(Node::new("a"));
         let b = g.add_node(Node::new("b"));
-        let forward = g.add_edge(a, b);
-        let back = g.add_edge(b, a);
+        let forward = g.add_edge(a, b).unwrap();
+        let back = g.add_edge(b, a).unwrap();
 
         let drawing = crate::layout(&g, Options::default());
         let heading = |edge| drawing.routes().find(|r| r.edge == edge).map(|r| r.heading);
@@ -408,7 +703,7 @@ mod tests {
         let mut g = Graph::new();
         let a = g.add_node(Node::new("a"));
         let b = g.add_node(Node::new("a much longer label than the other"));
-        g.add_edge(a, b);
+        g.add_edge(a, b).unwrap();
 
         let drawing = crate::layout(&g, Options::new().box_width(18));
         assert!(drawing.boxes().all(|b| b.rect.w == 18), "{drawing:?}");
@@ -422,7 +717,7 @@ mod tests {
         let mut g = Graph::new();
         let a = g.add_node(Node::new("a"));
         let tall = g.add_node(Node::new("b").line("1").line("2").line("3").line("4"));
-        g.add_edge(a, tall);
+        g.add_edge(a, tall).unwrap();
 
         let drawing = crate::layout(&g, Options::new().box_height(5));
         let height = |node| drawing.boxed_at(node).map(|b| b.rect.h);
@@ -430,20 +725,95 @@ mod tests {
         assert_eq!(height(tall), Some(7), "four lines need seven rows");
     }
 
-    /// A cell outside the frame is dropped rather than panicking. A caller's
-    /// drawing is not trusted input.
     #[test]
-    fn a_route_off_the_frame_is_dropped_not_fatal() {
+    fn an_invalid_frame_is_rejected_before_it_allocates() {
+        assert!(matches!(
+            Drawing::new(0, 2),
+            Err(DrawingError::InvalidSize { .. })
+        ));
+        assert!(matches!(
+            Drawing::new(2_001, 2_000),
+            Err(DrawingError::FrameTooLarge { .. })
+        ));
+    }
+
+    #[test]
+    fn boxes_must_be_positive_unique_and_inside_the_frame() {
+        let mut g = Graph::new();
+        let a = g.add_node(Node::new("a"));
+        let mut drawing = drawing(4, 2);
+
+        assert!(matches!(
+            drawing.boxed(a, 0, Rect::new(0, 0, 0, 2)),
+            Err(DrawingError::InvalidRect { .. })
+        ));
+        assert!(matches!(
+            drawing.boxed(a, 0, Rect::new(i32::MAX, 0, 2, 2)),
+            Err(DrawingError::BoxOutOfBounds { .. })
+        ));
+        drawing.boxed(a, 0, Rect::new(0, 0, 2, 2)).unwrap();
+        assert!(matches!(
+            drawing.boxed(a, 0, Rect::new(2, 0, 2, 2)),
+            Err(DrawingError::DuplicateNode(node)) if node == a
+        ));
+    }
+
+    #[test]
+    fn routes_must_be_bounded_orthogonal_and_unique() {
         let mut g = Graph::new();
         let a = g.add_node(Node::new("a"));
         let b = g.add_node(Node::new("b"));
-        let edge = g.add_edge(a, b);
+        let edge = g.add_edge(a, b).unwrap();
+        let mut drawing = drawing(4, 2);
 
-        let mut drawing = Drawing::new(4, 2);
-        drawing.boxed(a, 0, Rect::new(0, 0, 2, 2));
-        drawing.boxed(b, 1, Rect::new(2, 0, 2, 2));
-        drawing.route(edge, [(-5, 0), (900, 0)]);
+        assert!(matches!(
+            drawing.route(edge, [(0, 0)]),
+            Err(DrawingError::RouteTooShort(_))
+        ));
+        assert!(matches!(
+            drawing.route(edge, [(0, 0), (2, 1)]),
+            Err(DrawingError::DiagonalSegment { .. })
+        ));
+        assert!(matches!(
+            drawing.route(edge, [(-1, 0), (2, 0)]),
+            Err(DrawingError::RouteOutOfBounds { .. })
+        ));
+        drawing.route(edge, [(0, 0), (3, 0)]).unwrap();
+        assert!(matches!(
+            drawing.route(edge, [(0, 1), (3, 1)]),
+            Err(DrawingError::DuplicateEdge(found)) if found == edge
+        ));
+    }
 
-        assert_eq!(crate::score_drawing(&g, &drawing).ink, 4);
+    #[test]
+    fn aggregate_route_work_is_bounded() {
+        let mut g = Graph::new();
+        let a = g.add_node(Node::new("a"));
+        let b = g.add_node(Node::new("b"));
+        let edge = g.add_edge(a, b).unwrap();
+        let mut drawing = drawing(2_000, 1);
+        let points = (0..MAX_ROUTE_POINTS).map(|at| if at % 2 == 0 { (0, 0) } else { (1_999, 0) });
+
+        assert!(matches!(
+            drawing.route(edge, points),
+            Err(DrawingError::RouteBudgetExceeded)
+        ));
+    }
+
+    #[test]
+    fn drawing_consumers_reject_ids_outside_the_graph() {
+        let g = Graph::new();
+        let mut drawing = drawing(2, 2);
+        let missing = NodeId::from_index(7);
+        drawing.boxed(missing, 0, Rect::new(0, 0, 2, 2)).unwrap();
+
+        assert_eq!(
+            crate::score_drawing(&g, &drawing),
+            Err(DrawingError::UnknownNode(missing))
+        );
+        assert_eq!(
+            crate::draw_drawing(&g, &drawing, Options::default()),
+            Err(DrawingError::UnknownNode(missing))
+        );
     }
 }

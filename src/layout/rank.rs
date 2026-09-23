@@ -109,7 +109,7 @@ mod tests {
             .map(|i| g.add_node(Node::new(format!("n{i}"))))
             .collect();
         for &(a, b) in edges {
-            g.add_edge(ids[a], ids[b]);
+            g.add_edge(ids[a], ids[b]).unwrap();
         }
         let adj = Adjacency::of(&g);
         let ranked = rank(&g, &adj, &back_edges(&g, &adj));
@@ -150,7 +150,7 @@ mod tests {
             .map(|i| g.add_node(Node::new(format!("n{i}"))))
             .collect();
         for target in &ids[1..] {
-            g.add_edge(ids[0], *target);
+            g.add_edge(ids[0], *target).unwrap();
         }
         let adj = Adjacency::of(&g);
         let ranked = rank(&g, &adj, &back_edges(&g, &adj));

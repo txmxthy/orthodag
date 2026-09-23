@@ -57,7 +57,8 @@ pub fn seeded(seed: u64, nodes: usize, edges: usize) -> Graph {
         match next() % 3 {
             0 => g.add_edge(ids[from], ids[to]),
             n => g.add_tagged_edge(ids[from], ids[to], [format!("t{n}")]),
-        };
+        }
+        .unwrap();
     }
     g
 }
@@ -128,7 +129,7 @@ fn build(names: &[&str], edges: &[(usize, usize)]) -> Graph {
     let mut g = Graph::new();
     let ids: Vec<_> = names.iter().map(|n| g.add_node(Node::new(*n))).collect();
     for &(a, b) in edges {
-        g.add_edge(ids[a], ids[b]);
+        g.add_edge(ids[a], ids[b]).unwrap();
     }
     g
 }
@@ -187,10 +188,10 @@ fn two_tags() -> Graph {
     let split = g.add_node(Node::new("split").line("2 partitions"));
     let even = g.add_node(Node::new("even"));
     let odd = g.add_node(Node::new("odd"));
-    g.add_edge(source, split);
-    g.add_tagged_edge(split, even, ["even"]);
-    g.add_tagged_edge(split, odd, ["odd"]);
-    g.add_tagged_edge(source, even, ["even", "direct"]);
+    g.add_edge(source, split).unwrap();
+    g.add_tagged_edge(split, even, ["even"]).unwrap();
+    g.add_tagged_edge(split, odd, ["odd"]).unwrap();
+    g.add_tagged_edge(source, even, ["even", "direct"]).unwrap();
     g
 }
 

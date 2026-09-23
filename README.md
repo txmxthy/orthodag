@@ -14,14 +14,14 @@ orthodag renders a directed graph as Unicode box-drawing text.
 Vertices become boxes, and edges become orthogonal lines that fit a target width,
 against an explicit objective for what a good drawing looks like.
 
-The default build carries no dependencies, and there is never a dependency on a
-terminal library. The output is text and styled spans, and whether those become
-escape codes, HTML or a widget buffer is the caller's business.
+Dependencies are limited to Unicode text measurement; there is never a dependency
+on a terminal library. The output is text and styled spans, and whether those
+become escape codes, HTML or a widget buffer is the caller's business.
 
-> **Status: 0.1.0, early.** Everything documented here works and is tested,
-> though whether the drawings are *good* is a separate question, asked and
-> answered in [docs/quality.md](docs/quality.md): the small graphs are provably
-> optimal, and the large ones are not yet.
+> **Status: 0.1.0, early.** Everything documented here works and is tested.
+> Layout quality is measured against the committed fixtures and baseline in
+> [docs/quality.md](docs/quality.md); those small examples do not establish
+> quality on larger or different graphs.
 
 ## Motivation
 
@@ -132,7 +132,7 @@ use orthodag::{Graph, Node};
 let mut g = Graph::new();
 let a = g.add_node(Node::new("read"));
 let b = g.add_node(Node::new("parse"));
-g.add_edge(a, b);
+g.add_edge(a, b).expect("both nodes belong to this graph");
 
 print!("{}", orthodag::draw(&g));
 ```
@@ -178,9 +178,16 @@ because half a box is worse than a wide one.
 |---|---|
 | `mermaid` | read a graph from Mermaid flowchart source, and write one back |
 | `dot` | write Graphviz DOT |
-| `serde` | serialise the model and the score |
+| `serde` | serialise graphs, drawings, options, scores and defects |
 
 Off by default, so nobody pays for one they do not use.
+
+With `serde`, `Graph`, `Options` and `Score` serialize and deserialize normally.
+`Drawing` and `Defect` serialize normally, then deserialize with
+`Drawing::deserialize_with(&graph, deserializer)` and
+`Defect::deserialize_with(&graph, deserializer)`. Their node and edge indices
+must be rebound to a graph because process-local graph identity is deliberately
+not written to the wire format.
 
 ### Scoring a drawing of your own
 
@@ -232,19 +239,20 @@ pair of edges responsible and the phase that could have prevented it.
   first, nearest or median taken over a hash map sorts first, and tests assert
   this directly, using exact rational barycentres rather than floats for that
   reason.
-- **No panics.** No `unwrap` or `expect` outside tests; clippy denies them.
-- **Budgeted.** Every stage that scales with graph size carries an explicit
-  budget expressed in edges.
+- **Panic-resistant.** Clippy denies `unwrap`, `expect` and explicit panics
+  outside tests. Caller-supplied drawing geometry is validated and bounded.
+- **Budgeted.** Layout searches and caller-supplied drawing geometry carry
+  explicit work and allocation limits.
 - **Snapshot-tested.** The drawings are the specification: any change that
   moves a character shows up as a diff a human reads and accepts by hand, and
   there is deliberately no update-everything switch.
 
 ## Limits
 
-- **Small graphs are provably optimal; large ones are not.** An exact solver
-  checks this: on the committed fixtures, the layout sits at or within two
-  points of the proven floor. On dense graphs — fifty nodes, a hundred edges —
-  it is measurably worse, and the remaining defects are documented.
+- **Quality evidence is corpus-bound.** The committed fixtures have no
+  vocabulary defects and cannot regress beyond the checked-in score baseline.
+  Generated and private corpora are useful review inputs, not a proof of
+  optimality or a guarantee for arbitrary graphs.
 - **Back edges keep their original direction.** A cycle's edge is taken out of
   the layering and drawn through a lane under the boxes, because a reversed
   arrow reads as pointing the wrong way in a terminal, which costs more than

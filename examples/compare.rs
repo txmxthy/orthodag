@@ -63,14 +63,27 @@ fn main() {
     };
 
     let options = Options::default();
-    let theirs = orthodag::score_drawing(&g, &drawing);
+    let theirs = match orthodag::score_drawing(&g, &drawing) {
+        Ok(score) => score,
+        Err(why) => {
+            eprintln!("{other_path}: {why}");
+            return;
+        }
+    };
     let ours = orthodag::score_with(&g, options);
 
     if !title.is_empty() {
         println!("──── {title} ────");
     }
     println!("════ supplied ════");
-    print!("{}", orthodag::draw_drawing(&g, &drawing, options));
+    let supplied = match orthodag::draw_drawing(&g, &drawing, options) {
+        Ok(art) => art,
+        Err(why) => {
+            eprintln!("{other_path}: {why}");
+            return;
+        }
+    };
+    print!("{supplied}");
     println!("\n════ this library ════");
     print!("{}", orthodag::draw_with(&g, options));
     println!();
@@ -100,13 +113,13 @@ fn to_drawing(g: &Graph, json: &Json) -> Result<Drawing, String> {
     let mut width = 0;
     let mut height = 0;
     for b in &boxes {
-        width = width.max(b.int("x")? + b.int("w")?);
-        height = height.max(b.int("y")? + b.int("h")?);
+        width = width.max(extent(b.int("x")?, b.int("w")?)?);
+        height = height.max(extent(b.int("y")?, b.int("h")?)?);
     }
     for r in &routes {
         for (x, y) in points(r)? {
-            width = width.max(x + 1);
-            height = height.max(y + 1);
+            width = width.max(extent(x, 1)?);
+            height = height.max(extent(y, 1)?);
         }
     }
     if let Ok(w) = json.int("width") {
@@ -116,27 +129,38 @@ fn to_drawing(g: &Graph, json: &Json) -> Result<Drawing, String> {
         height = h;
     }
 
-    let mut drawing = Drawing::new(width, height);
+    let mut drawing = Drawing::new(width, height).map_err(|why| why.to_string())?;
     for b in &boxes {
         let at = index(b.int("node")?)?;
         let node = nodes
             .get(at)
             .ok_or_else(|| format!("node {at} is not in the graph"))?;
         let column = index(b.int("column")?)?;
-        drawing.boxed(
-            *node,
-            column,
-            Rect::new(b.int("x")?, b.int("y")?, b.int("w")?, b.int("h")?),
-        );
+        drawing
+            .boxed(
+                *node,
+                column,
+                Rect::new(b.int("x")?, b.int("y")?, b.int("w")?, b.int("h")?),
+            )
+            .map_err(|why| why.to_string())?;
     }
     for r in &routes {
         let at = index(r.int("edge")?)?;
         let edge = edges
             .get(at)
             .ok_or_else(|| format!("edge {at} is not in the graph"))?;
-        drawing.route(*edge, points(r)?);
+        drawing
+            .route(*edge, points(r)?)
+            .map_err(|why| why.to_string())?;
     }
+    drawing.validate(g).map_err(|why| why.to_string())?;
     Ok(drawing)
+}
+
+fn extent(origin: i32, size: i32) -> Result<i32, String> {
+    origin
+        .checked_add(size)
+        .ok_or_else(|| format!("{origin} + {size} is outside the coordinate range"))
 }
 
 fn index(n: i32) -> Result<usize, String> {

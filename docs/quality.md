@@ -116,9 +116,10 @@ Record an accepted set of scores with:
 just baseline
 ```
 
-This creates `target/quality/baseline.txt` using the score example's `--record`
-output. The file is local and uncommitted. Without it, the baseline test skips;
-the committed `CLEAN` checks still run.
+This rewrites the committed `testdata/quality-baseline.txt` from the public
+fixtures using the score example's name-sorted `--record` output. A missing,
+malformed or incompatible baseline fails the quality test. Private corpus data
+is never included.
 
 `tests/quality.rs` applies these per-field allowances relative to the baseline:
 

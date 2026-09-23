@@ -21,6 +21,11 @@
 use crate::graph::{EdgeId, Graph, NodeId};
 
 /// What is wrong in one cell.
+#[cfg_attr(
+    feature = "serde",
+    derive(::serde::Serialize, ::serde::Deserialize),
+    serde(rename_all = "snake_case")
+)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Fault {
     /// Two edges pass each other at a right angle.

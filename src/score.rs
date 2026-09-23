@@ -401,6 +401,8 @@ fn detour(route: &Route) -> i32 {
 ///
 /// **Reported** is computed and deliberately left out of the objective, because
 /// these are diagnostics rather than goals.
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Score {
     /// Neighbouring edges that bend more than twice.
@@ -816,10 +818,10 @@ mod tests {
             .collect();
         let mut apart = same.clone();
 
-        same.add_tagged_edge(ids[0], ids[2], ["t"]);
-        same.add_tagged_edge(ids[1], ids[2], ["t"]);
-        apart.add_tagged_edge(ids[0], ids[2], ["red"]);
-        apart.add_tagged_edge(ids[1], ids[2], ["blue"]);
+        same.add_tagged_edge(ids[0], ids[2], ["t"]).unwrap();
+        same.add_tagged_edge(ids[1], ids[2], ["t"]).unwrap();
+        apart.add_tagged_edge(ids[0], ids[2], ["red"]).unwrap();
+        apart.add_tagged_edge(ids[1], ids[2], ["blue"]).unwrap();
 
         assert_eq!(
             crate::score(&same).mixed,
@@ -840,7 +842,7 @@ mod tests {
         let mut g = Graph::new();
         let ids: Vec<_> = nodes.iter().map(|n| g.add_node(Node::new(*n))).collect();
         for &(a, b) in edges {
-            g.add_edge(ids[a], ids[b]);
+            g.add_edge(ids[a], ids[b]).unwrap();
         }
         let layout = layout::build(&g, crate::options::Options::default());
         (g, layout)
@@ -1000,8 +1002,8 @@ mod tests {
         let ids: Vec<_> = (0..4)
             .map(|i| g.add_node(Node::new(format!("n{i}"))))
             .collect();
-        let one = g.add_edge(ids[0], ids[1]);
-        let other = g.add_edge(ids[2], ids[3]);
+        let one = g.add_edge(ids[0], ids[1]).unwrap();
+        let other = g.add_edge(ids[2], ids[3]).unwrap();
         let flat = |edge| Ink { edge, bits: L | R };
 
         assert_eq!(shared(&g, flat(one), flat(other)), Shared::Overlap);
@@ -1077,9 +1079,9 @@ mod tests {
             .map(|n| g.add_node(Node::new(*n)))
             .collect();
         let spare = g.add_node(Node::new("spare"));
-        g.add_edge(spare, ids[0]);
-        g.add_edge(source, ids[1]);
-        g.add_edge(source, ids[2]);
+        g.add_edge(spare, ids[0]).unwrap();
+        g.add_edge(source, ids[1]).unwrap();
+        g.add_edge(source, ids[2]).unwrap();
         let s = score(
             &g,
             &crate::layout::build(&g, crate::options::Options::default()),
@@ -1164,7 +1166,8 @@ mod tests {
             match tags {
                 Some(tag) => g.add_tagged_edge(source, sink, [tag]),
                 None => g.add_edge(source, sink),
-            };
+            }
+            .unwrap();
         }
         score(
             &g,
@@ -1178,8 +1181,8 @@ mod tests {
         let a = g.add_node(Node::new("a"));
         let b = g.add_node(Node::new("b"));
         let sink = g.add_node(Node::new("sink"));
-        g.add_tagged_edge(a, sink, [one]);
-        g.add_tagged_edge(b, sink, [other]);
+        g.add_tagged_edge(a, sink, [one]).unwrap();
+        g.add_tagged_edge(b, sink, [other]).unwrap();
         score(
             &g,
             &crate::layout::build(&g, crate::options::Options::default()),
@@ -1225,8 +1228,8 @@ mod tests {
             let a = g.add_node(Node::new("a"));
             let b = g.add_node(Node::new("b"));
             let sink = g.add_node(Node::new("sink"));
-            g.add_tagged_edge(a, sink, ["x"]);
-            g.add_tagged_edge(b, sink, ["x"]);
+            g.add_tagged_edge(a, sink, ["x"]).unwrap();
+            g.add_tagged_edge(b, sink, ["x"]).unwrap();
             Raster::of(&crate::layout::build(
                 &g,
                 crate::options::Options::default(),

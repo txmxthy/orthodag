@@ -2,53 +2,54 @@
 //!
 //! `cargo run --example draw`
 
-use orthodag::{Graph, Node};
+use orthodag::{Graph, GraphError, Node};
 
-fn main() {
+fn main() -> Result<(), GraphError> {
     for (name, graph) in [
-        ("chain", chain()),
-        ("fan-out", fan_out()),
-        ("diamond", diamond()),
+        ("chain", chain()?),
+        ("fan-out", fan_out()?),
+        ("diamond", diamond()?),
     ] {
         println!("{name}\n{}", orthodag::draw(&graph));
     }
+    Ok(())
 }
 
 /// Three boxes in a row.
-fn chain() -> Graph {
+fn chain() -> Result<Graph, GraphError> {
     let mut g = Graph::new();
     let a = g.add_node(Node::new("in"));
     let b = g.add_node(Node::new("cat"));
     let c = g.add_node(Node::new("out"));
-    g.add_edge(a, b);
-    g.add_edge(b, c);
-    g
+    g.add_edge(a, b)?;
+    g.add_edge(b, c)?;
+    Ok(g)
 }
 
 /// One box into three.
-fn fan_out() -> Graph {
+fn fan_out() -> Result<Graph, GraphError> {
     let mut g = Graph::new();
     let source = g.add_node(Node::new("source"));
     for name in ["even", "odd", "late"] {
         let target = g.add_node(Node::new(name));
-        g.add_tagged_edge(source, target, [name]);
+        g.add_tagged_edge(source, target, [name])?;
     }
-    g
+    Ok(g)
 }
 
 /// A split that rejoins, with an edge skipping the middle.
-fn diamond() -> Graph {
+fn diamond() -> Result<Graph, GraphError> {
     let mut g = Graph::new();
     let source = g.add_node(Node::new("in"));
     let split = g.add_node(Node::new("split"));
     let even = g.add_node(Node::new("even"));
     let odd = g.add_node(Node::new("odd"));
     let sink = g.add_node(Node::new("sink").line("2 parts"));
-    g.add_edge(source, split);
-    g.add_edge(split, even);
-    g.add_edge(split, odd);
-    g.add_edge(even, sink);
-    g.add_edge(odd, sink);
-    g.add_edge(source, sink);
-    g
+    g.add_edge(source, split)?;
+    g.add_edge(split, even)?;
+    g.add_edge(split, odd)?;
+    g.add_edge(even, sink)?;
+    g.add_edge(odd, sink)?;
+    g.add_edge(source, sink)?;
+    Ok(g)
 }

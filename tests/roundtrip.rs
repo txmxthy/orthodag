@@ -9,9 +9,9 @@
 
 mod common;
 
-use orthodag::Graph;
 use orthodag::io::mermaid_in::from_mermaid;
 use orthodag::io::mermaid_out::to_mermaid;
+use orthodag::{Graph, Node};
 
 /// The single graph in a document, which is what the writer always produces.
 fn read(source: &str) -> Graph {
@@ -38,6 +38,28 @@ fn a_second_trip_changes_nothing() {
             "{name} is not settled after one trip"
         );
     }
+}
+
+#[test]
+fn labels_and_tags_with_mermaid_syntax_survive_the_trip() {
+    let mut graph = Graph::new();
+    let source = graph
+        .add_node(Node::new("say \"R&D\" <br> [α](β){γ} > now").line("line & <literal> \"終\""));
+    let sink = graph.add_node(Node::new("出口 | --> [](){}"));
+    graph
+        .add_tagged_edge(source, sink, ["x & y", "say \"hi\"", "<br>"])
+        .unwrap();
+
+    let written = to_mermaid(&graph);
+    assert!(
+        written.contains("&quot;R&amp;D&quot; &lt;br&gt;"),
+        "{written}"
+    );
+    assert!(
+        written.contains("&lt;literal&gt; &quot;終&quot;"),
+        "{written}"
+    );
+    assert_eq!(read(&written), graph);
 }
 
 #[test]

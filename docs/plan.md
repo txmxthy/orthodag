@@ -1,9 +1,9 @@
 # Build plan
 
-This document records the implementation sequence and acceptance criteria for
-the library described in [the design](design.md). Implementation has reached the
-documentation stage; Cargo publication is still disabled with `publish = false`.
-Ongoing layout work follows [the quality guide](quality.md).
+This document records the completed implementation sequence and acceptance
+criteria for the library described in [the design](design.md). The crate is
+prepared for its first Cargo release. Ongoing layout work follows
+[the quality guide](quality.md).
 
 ## Implementation order
 
@@ -60,13 +60,11 @@ by budgets based on graph size, with a test for the candidate-count limit.
 ### Score regression checks
 
 Fixtures in the committed `CLEAN` list must retain zero vocabulary defects.
-A separate local test compares scores with a baseline under `target/quality`.
-It rejects any increase in vocabulary defects and limits regressions in other
-fields. The aggregate soft score must not increase.
-
-The baseline is recorded after a change has been reviewed and accepted. It is
-not committed, and the baseline test skips when the file is absent. See
-[the quality guide](quality.md#regression-checks) for commands and tolerances.
+A separate test compares scores with the committed
+`testdata/quality-baseline.txt`. It rejects a missing or malformed baseline,
+any increase in vocabulary defects, and regressions beyond the documented
+tolerances. The aggregate soft score must not increase. See
+[the quality guide](quality.md#regression-checks) for the update procedure.
 
 ## Corpus
 

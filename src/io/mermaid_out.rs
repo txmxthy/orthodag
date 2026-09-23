@@ -18,9 +18,10 @@ pub fn to_mermaid(g: &Graph) -> String {
     for (at, node) in g.nodes().iter().enumerate() {
         let text = std::iter::once(node.label())
             .chain(node.lines().iter().map(String::as_str))
+            .map(escape)
             .collect::<Vec<_>>()
             .join("<br>");
-        let _ = writeln!(out, "  n{at}[\"{}\"]", escape(&text));
+        let _ = writeln!(out, "  n{at}[\"{text}\"]");
     }
 
     for edge in g.edges() {
@@ -39,10 +40,12 @@ pub fn to_mermaid(g: &Graph) -> String {
     out
 }
 
-/// Mermaid has no escape for a quote inside a quoted label, so it becomes an
-/// HTML entity, which Mermaid does read.
+/// Escape text before putting it inside a quoted Mermaid label.
 fn escape(text: &str) -> String {
-    text.replace('"', "&quot;")
+    text.replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 #[cfg(test)]
@@ -56,7 +59,7 @@ mod tests {
         let mut g = Graph::new();
         let a = g.add_node(Node::new("in"));
         let b = g.add_node(Node::new("out"));
-        g.add_edge(a, b);
+        g.add_edge(a, b).unwrap();
         assert_eq!(
             to_mermaid(&g),
             "graph LR\n  n0[\"in\"]\n  n1[\"out\"]\n  n0 --> n1\n"
@@ -68,7 +71,7 @@ mod tests {
         let mut g = Graph::new();
         let a = g.add_node(Node::new("a"));
         let b = g.add_node(Node::new("b"));
-        g.add_tagged_edge(a, b, ["odd", "late"]);
+        g.add_tagged_edge(a, b, ["odd", "late"]).unwrap();
         assert!(to_mermaid(&g).contains("n0 -->|late, odd| n1"));
     }
 

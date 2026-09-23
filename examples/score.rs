@@ -9,9 +9,8 @@
 //! `--wide` needs the `mermaid` feature to read a corpus from disk, and quietly
 //! scores nothing extra when there is none.
 //!
-//! The recorded form is what `tests/quality.rs` compares against. Write it with
-//! `cargo run --example score -- --record > target/quality/baseline.txt`, and
-//! only after a change has been looked at and accepted.
+//! The recorded form is what `tests/quality.rs` compares against. `just baseline`
+//! writes the accepted public-corpus baseline after a change has been reviewed.
 
 #[path = "../tests/common/mod.rs"]
 mod common;
@@ -107,7 +106,11 @@ fn main() {
     if std::env::args().any(|arg| arg == "--phases") {
         phases(&names);
     }
-    scored.sort_by(|a, b| (b.1.total, &a.0).cmp(&(a.1.total, &b.0)));
+    if record {
+        scored.sort_by(|a, b| a.0.cmp(&b.0));
+    } else {
+        scored.sort_by(|a, b| (b.1.total, &a.0).cmp(&(a.1.total, &b.0)));
+    }
     let widest = scored
         .iter()
         .map(|(name, _)| name.chars().count())
