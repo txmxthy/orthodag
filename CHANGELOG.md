@@ -2,7 +2,7 @@
 
 Notable changes, newest first. Versions follow [semver](https://semver.org/).
 
-## 0.1.0
+## [0.1.0] - 2026-09-23
 
 - The graph model: vertices with a label and extra lines, edges with a canonical
   tag set.
@@ -43,3 +43,5 @@ Everything the design set out to build exists. All nine committed fixtures have
 zero vocabulary defects and are protected by a checked-in score baseline.
 Generated and private corpora remain review evidence rather than a guarantee
 for arbitrary graphs. See `docs/quality.md`.
+
+[0.1.0]: https://github.com/txmxthy/orthodag/releases/tag/v0.1.0
