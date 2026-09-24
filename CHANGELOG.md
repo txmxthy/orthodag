@@ -2,6 +2,18 @@
 
 Notable changes, newest first. Versions follow [semver](https://semver.org/).
 
+## [0.1.1](https://github.com/txmxthy/orthodag/compare/v0.1.0...v0.1.1) - 2026-09-23
+
+### Fixed
+
+- graph decoding is bounded and drawing checks are linear ([#3](https://github.com/txmxthy/orthodag/pull/3))
+
+### Other
+
+- prepare orthodag for its alpha release ([#6](https://github.com/txmxthy/orthodag/pull/6))
+- *(deps)* bump actions/checkout from 6.0.2 to 7.0.1 in the actions group ([#5](https://github.com/txmxthy/orthodag/pull/5))
+- *(release)* automate crate releases ([#2](https://github.com/txmxthy/orthodag/pull/2))
+
 ## [0.1.0] - 2026-09-23
 
 - The graph model: vertices with a label and extra lines, edges with a canonical
